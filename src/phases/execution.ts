@@ -11,6 +11,7 @@ import type {
   ILogger,
 } from '../deps.js';
 import type { TaskOutcome } from '../types.js';
+import type { CliSkillExecutor } from '../skills/cli-skill-executor.js';
 import { NullLogger } from '../logger.js';
 
 export class HitlRejectedError extends Error {
@@ -36,6 +37,7 @@ export async function runExecution(
   observer: IObserverModule,
   mcp?: IMcpModule,
   logger: ILogger = new NullLogger(),
+  cliExecutor?: CliSkillExecutor,
 ): Promise<readonly TaskOutcome[]> {
   ctx.phase = 'execution';
   ctx.addAudit('orchestrator', 'phase:start', { phase: 'execution' });
@@ -83,6 +85,7 @@ export async function runExecution(
       completedOutputs,
       mcp,
       logger,
+      cliExecutor,
     );
     outcomes.push(outcome);
 
@@ -118,6 +121,7 @@ async function executeTask(
   completedOutputs: ReadonlyMap<string, unknown>,
   _mcp?: IMcpModule,
   logger: ILogger = new NullLogger(),
+  cliExecutor?: CliSkillExecutor,
 ): Promise<TaskOutcome> {
   const startTime = Date.now();
   const span = observer.startSpan(`task:${task.id}`);
@@ -220,8 +224,22 @@ async function executeTask(
     let output: unknown;
     let tokensUsed = 0;
 
+    const availableSkills = skills.getAvailableSkills();
+
     for (const skillId of task.requiredSkills) {
-      const result = await skills.execute(skillId, baseInput);
+      const descriptor = availableSkills.find(sk => sk.id === skillId);
+      const isCli = descriptor?.executionType === 'cli';
+
+      let result;
+      if (isCli) {
+        if (!cliExecutor) {
+          throw new Error(`CLI skill '${skillId}' requires a CliSkillExecutor but none was provided`);
+        }
+        result = await cliExecutor.execute(skillId, baseInput, {} as never);
+      } else {
+        result = await skills.execute(skillId, baseInput);
+      }
+
       output = result.output;
       tokensUsed += result.tokensUsed ?? 0;
       logger.debug('Execution: skill complete', { taskId: task.id, skillId, tokensUsed });

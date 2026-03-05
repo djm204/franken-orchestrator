@@ -2,6 +2,8 @@ import { describe, it, expect, vi } from 'vitest';
 import { runExecution } from '../../../src/phases/execution.js';
 import { BeastContext } from '../../../src/context/franken-context.js';
 import { makeSkills, makeGovernor, makeMemory, makeObserver, makeLogger } from '../../helpers/stubs.js';
+import type { CliSkillExecutor } from '../../../src/skills/cli-skill-executor.js';
+import type { SkillInput, SkillResult } from '../../../src/deps.js';
 
 function ctx(tasks = [{ id: 't1', objective: 'do it', requiredSkills: [] as string[], dependsOn: [] as string[] }]): BeastContext {
   const c = new BeastContext('proj', 'sess', 'input');
@@ -312,6 +314,164 @@ describe('runExecution', () => {
     expect(memory.recordTrace).toHaveBeenCalledWith(
       expect.objectContaining({ taskId: 't1', outcome: 'failure' }),
     );
+  });
+
+  // ── CLI skill routing tests ──
+
+  function makeCliExecutor(overrides: Partial<CliSkillExecutor> = {}): CliSkillExecutor {
+    return {
+      execute: vi.fn(async (_skillId: string, _input: SkillInput, _config: unknown): Promise<SkillResult> => ({
+        output: 'cli-output',
+        tokensUsed: 5,
+      })),
+      ...overrides,
+    } as unknown as CliSkillExecutor;
+  }
+
+  it('routes cli executionType skills through cliExecutor', async () => {
+    const cliExec = makeCliExecutor();
+    const skills = makeSkills({
+      hasSkill: vi.fn(() => true),
+      getAvailableSkills: vi.fn(() => [
+        { id: 'build', name: 'Build', requiresHitl: false, executionType: 'cli' as const },
+      ]),
+      execute: vi.fn(async () => ({ output: 'llm-output', tokensUsed: 1 })),
+    });
+    const c = ctx([
+      { id: 't1', objective: 'build it', requiredSkills: ['build'], dependsOn: [] },
+    ]);
+
+    const outcomes = await runExecution(c, skills, makeGovernor(), makeMemory(), makeObserver(), undefined, undefined, cliExec);
+
+    expect(cliExec.execute).toHaveBeenCalledTimes(1);
+    expect(cliExec.execute).toHaveBeenCalledWith('build', expect.objectContaining({ objective: 'build it' }), expect.anything());
+    expect(skills.execute).not.toHaveBeenCalled();
+    expect(outcomes[0]!.status).toBe('success');
+    expect(outcomes[0]!.output).toBe('cli-output');
+  });
+
+  it('routes llm executionType skills through skills.execute (regression)', async () => {
+    const cliExec = makeCliExecutor();
+    const skills = makeSkills({
+      hasSkill: vi.fn(() => true),
+      getAvailableSkills: vi.fn(() => [
+        { id: 'alpha', name: 'Alpha', requiresHitl: false, executionType: 'llm' as const },
+      ]),
+      execute: vi.fn(async () => ({ output: 'llm-output', tokensUsed: 3 })),
+    });
+    const c = ctx([
+      { id: 't1', objective: 'llm task', requiredSkills: ['alpha'], dependsOn: [] },
+    ]);
+
+    const outcomes = await runExecution(c, skills, makeGovernor(), makeMemory(), makeObserver(), undefined, undefined, cliExec);
+
+    expect(skills.execute).toHaveBeenCalledTimes(1);
+    expect(cliExec.execute).not.toHaveBeenCalled();
+    expect(outcomes[0]!.output).toBe('llm-output');
+  });
+
+  it('handles mixed cli and llm skills in the same plan', async () => {
+    const cliExec = makeCliExecutor();
+    const skills = makeSkills({
+      hasSkill: vi.fn(() => true),
+      getAvailableSkills: vi.fn(() => [
+        { id: 'build', name: 'Build', requiresHitl: false, executionType: 'cli' as const },
+        { id: 'analyze', name: 'Analyze', requiresHitl: false, executionType: 'llm' as const },
+      ]),
+      execute: vi.fn(async () => ({ output: 'llm-output', tokensUsed: 2 })),
+    });
+    const c = ctx([
+      { id: 't1', objective: 'build', requiredSkills: ['build'], dependsOn: [] },
+      { id: 't2', objective: 'analyze', requiredSkills: ['analyze'], dependsOn: [] },
+    ]);
+
+    const outcomes = await runExecution(c, skills, makeGovernor(), makeMemory(), makeObserver(), undefined, undefined, cliExec);
+
+    expect(cliExec.execute).toHaveBeenCalledTimes(1);
+    expect(skills.execute).toHaveBeenCalledTimes(1);
+    expect(outcomes[0]!.output).toBe('cli-output');
+    expect(outcomes[1]!.output).toBe('llm-output');
+  });
+
+  it('throws when cli skill has no cliExecutor provided', async () => {
+    const skills = makeSkills({
+      hasSkill: vi.fn(() => true),
+      getAvailableSkills: vi.fn(() => [
+        { id: 'build', name: 'Build', requiresHitl: false, executionType: 'cli' as const },
+      ]),
+    });
+    const c = ctx([
+      { id: 't1', objective: 'build', requiredSkills: ['build'], dependsOn: [] },
+    ]);
+
+    const outcomes = await runExecution(c, skills, makeGovernor(), makeMemory(), makeObserver());
+
+    expect(outcomes[0]!.status).toBe('failure');
+    expect(outcomes[0]!.error).toContain("CLI skill 'build' requires a CliSkillExecutor but none was provided");
+  });
+
+  it('falls through to skills.execute when skill not found in available skills list', async () => {
+    const cliExec = makeCliExecutor();
+    const skills = makeSkills({
+      hasSkill: vi.fn(() => true),
+      getAvailableSkills: vi.fn(() => []),  // skill not in available list
+      execute: vi.fn(async () => ({ output: 'fallback-output', tokensUsed: 1 })),
+    });
+    const c = ctx([
+      { id: 't1', objective: 'unknown', requiredSkills: ['mystery'], dependsOn: [] },
+    ]);
+
+    const outcomes = await runExecution(c, skills, makeGovernor(), makeMemory(), makeObserver(), undefined, undefined, cliExec);
+
+    expect(skills.execute).toHaveBeenCalledTimes(1);
+    expect(cliExec.execute).not.toHaveBeenCalled();
+    expect(outcomes[0]!.output).toBe('fallback-output');
+  });
+
+  it('cli skills still respect requiresHitl on their SkillDescriptor', async () => {
+    const cliExec = makeCliExecutor();
+    const skills = makeSkills({
+      hasSkill: vi.fn(() => true),
+      getAvailableSkills: vi.fn(() => [
+        { id: 'deploy', name: 'Deploy', requiresHitl: true, executionType: 'cli' as const },
+      ]),
+    });
+    const governor = makeGovernor({
+      requestApproval: vi.fn(async () => ({
+        decision: 'rejected' as const,
+        reason: 'too risky',
+      })),
+    });
+    const c = ctx([
+      { id: 't1', objective: 'deploy', requiredSkills: ['deploy'], dependsOn: [] },
+    ]);
+
+    const outcomes = await runExecution(c, skills, governor, makeMemory(), makeObserver(), undefined, undefined, cliExec);
+
+    expect(governor.requestApproval).toHaveBeenCalled();
+    expect(outcomes[0]!.status).toBe('skipped');
+    expect(cliExec.execute).not.toHaveBeenCalled();
+  });
+
+  it('threads dependency outputs into cli skill input', async () => {
+    const cliExec = makeCliExecutor();
+    const skills = makeSkills({
+      hasSkill: vi.fn(() => true),
+      getAvailableSkills: vi.fn(() => [
+        { id: 'alpha', name: 'Alpha', requiresHitl: false, executionType: 'llm' as const },
+        { id: 'build', name: 'Build', requiresHitl: false, executionType: 'cli' as const },
+      ]),
+      execute: vi.fn(async () => ({ output: 'alpha-result', tokensUsed: 1 })),
+    });
+    const c = ctx([
+      { id: 't1', objective: 'first', requiredSkills: ['alpha'], dependsOn: [] },
+      { id: 't2', objective: 'second', requiredSkills: ['build'], dependsOn: ['t1'] },
+    ]);
+
+    await runExecution(c, skills, makeGovernor(), makeMemory(), makeObserver(), undefined, undefined, cliExec);
+
+    const cliInput = (cliExec.execute as ReturnType<typeof vi.fn>).mock.calls[0]![1] as SkillInput;
+    expect(cliInput.dependencyOutputs.get('t1')).toBe('alpha-result');
   });
 
   it('uses empty memory context when sanitizedIntent is undefined', async () => {
