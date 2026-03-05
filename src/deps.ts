@@ -27,12 +27,27 @@ export interface FirewallViolation {
 export interface ISkillsModule {
   hasSkill(skillId: string): boolean;
   getAvailableSkills(): readonly SkillDescriptor[];
+  execute(skillId: string, input: SkillInput): Promise<SkillResult>;
 }
 
 export interface SkillDescriptor {
   readonly id: string;
   readonly name: string;
   readonly requiresHitl: boolean;
+  readonly executionType: 'llm' | 'function' | 'mcp';
+}
+
+export interface SkillInput {
+  readonly objective: string;
+  readonly context: MemoryContext;
+  readonly dependencyOutputs: ReadonlyMap<string, unknown>;
+  readonly sessionId: string;
+  readonly projectId: string;
+}
+
+export interface SkillResult {
+  readonly output: unknown;
+  readonly tokensUsed?: number | undefined;
 }
 
 /** What the orchestrator needs from MOD-03 (Brain/Memory). */
@@ -140,6 +155,22 @@ export interface HeartbeatPulseResult {
   readonly summary: string;
 }
 
+export interface IMcpModule {
+  callTool(name: string, args: unknown): Promise<McpToolCallResult>;
+  getAvailableTools(): readonly McpToolInfo[];
+}
+
+export interface McpToolCallResult {
+  readonly content: unknown;
+  readonly isError: boolean;
+}
+
+export interface McpToolInfo {
+  readonly name: string;
+  readonly serverId: string;
+  readonly description: string;
+}
+
 /** Full dependency bag for the Beast Loop. */
 export interface BeastLoopDeps {
   readonly firewall: IFirewallModule;
@@ -150,5 +181,12 @@ export interface BeastLoopDeps {
   readonly critique: ICritiqueModule;
   readonly governor: IGovernorModule;
   readonly heartbeat: IHeartbeatModule;
+  readonly mcp?: IMcpModule;
   readonly clock: () => Date;
 }
+
+type _TypesAndInterfacesTest = {
+  readonly skillInput: SkillInput;
+  readonly skillResult: SkillResult;
+  readonly mcpModule: IMcpModule;
+};
