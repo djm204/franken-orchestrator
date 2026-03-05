@@ -93,11 +93,19 @@ describe('BeastLoop', () => {
       'BeastLoop: session start',
       expect.objectContaining({ sessionId: 'sess-1', projectId: 'proj' }),
     );
+    expect(logger.debug).toHaveBeenCalledWith(
+      'BeastLoop: session context',
+      expect.objectContaining({ sessionId: 'sess-1', projectId: 'proj' }),
+    );
+    expect(logger.debug).toHaveBeenCalledWith(
+      'BeastLoop: input',
+      expect.objectContaining({ input: expect.objectContaining({ userInput: 'test' }) }),
+    );
     expect(logger.info).toHaveBeenCalledWith('BeastLoop: phase start', { phase: 'ingestion' });
     expect(logger.info).toHaveBeenCalledWith('BeastLoop: phase end', { phase: 'closure' });
     expect(logger.info).toHaveBeenCalledWith(
       'BeastLoop: session end',
-      expect.objectContaining({ status: result.status }),
+      expect.objectContaining({ status: result.status, durationMs: expect.any(Number) }),
     );
     expect(logger.debug).toHaveBeenCalledWith(
       'BeastLoop: config',
