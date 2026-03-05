@@ -69,6 +69,7 @@ export class BeastLoop {
         this.deps.observer,
         this.deps.mcp,
         logger,
+        this.deps.cliExecutor,
       );
       logger.info('BeastLoop: phase end', { phase: 'execution' });
 

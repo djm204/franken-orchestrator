@@ -1,6 +1,7 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { BeastLoop } from '../../src/beast-loop.js';
-import { makeDeps, makeLogger } from '../helpers/stubs.js';
+import { makeDeps, makeLogger, makeSkills } from '../helpers/stubs.js';
+import type { CliSkillExecutor } from '../../src/skills/cli-skill-executor.js';
 
 describe('BeastLoop', () => {
   it('runs through all 4 phases and returns completed result', async () => {
@@ -110,6 +111,45 @@ describe('BeastLoop', () => {
     expect(logger.debug).toHaveBeenCalledWith(
       'BeastLoop: config',
       expect.objectContaining({ enableTracing: true }),
+    );
+  });
+
+  it('forwards cliExecutor dep to runExecution when a CLI skill is present', async () => {
+    const mockCliExecutor = {
+      execute: vi.fn(async () => ({ output: 'cli-output', tokensUsed: 42 })),
+    } as unknown as CliSkillExecutor;
+
+    const skills = makeSkills({
+      getAvailableSkills: vi.fn(() => [
+        { id: 'cli:chunk-01', name: 'CLI Chunk 01', requiresHitl: false, executionType: 'cli' as const },
+      ]),
+      hasSkill: vi.fn(() => true),
+    });
+
+    const deps = makeDeps({
+      skills,
+      planner: {
+        createPlan: vi.fn(async () => ({
+          tasks: [
+            { id: 'task-cli', objective: 'run cli', requiredSkills: ['cli:chunk-01'], dependsOn: [] },
+          ],
+        })),
+      },
+      cliExecutor: mockCliExecutor,
+    });
+
+    const loop = new BeastLoop(deps);
+    const result = await loop.run({
+      projectId: 'proj',
+      userInput: 'test cli forwarding',
+    });
+
+    expect(result.status).toBe('completed');
+    expect(mockCliExecutor.execute).toHaveBeenCalledTimes(1);
+    expect(mockCliExecutor.execute).toHaveBeenCalledWith(
+      'cli:chunk-01',
+      expect.objectContaining({ objective: 'run cli' }),
+      expect.anything(),
     );
   });
 });

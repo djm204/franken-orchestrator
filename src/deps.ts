@@ -1,3 +1,5 @@
+import type { CliSkillExecutor } from './skills/cli-skill-executor.js';
+
 /**
  * BeastLoopDeps — dependency injection interface for the orchestrator.
  * Follows the PulseOrchestratorDeps pattern from franken-heartbeat.
@@ -190,6 +192,7 @@ export interface BeastLoopDeps {
   readonly heartbeat: IHeartbeatModule;
   readonly logger: ILogger;
   readonly mcp?: IMcpModule;
+  readonly cliExecutor?: CliSkillExecutor;
   readonly clock: () => Date;
 }
 

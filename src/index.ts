@@ -63,6 +63,18 @@ export { AdapterLlmClient } from './adapters/adapter-llm-client.js';
 export { LlmSkillHandler } from './skills/llm-skill-handler.js';
 export { LlmPlanner } from './skills/llm-planner.js';
 
+// CLI skill execution
+export { CliSkillExecutor } from './skills/cli-skill-executor.js';
+export { RalphLoop } from './skills/ralph-loop.js';
+export { GitBranchIsolator } from './skills/git-branch-isolator.js';
+export type {
+  CliSkillConfig,
+  GitIsolationConfig,
+  RalphLoopConfig,
+  RalphLoopResult,
+  IterationResult,
+} from './skills/cli-types.js';
+
 // Resilience
 export {
   serializeContext,
