@@ -106,9 +106,16 @@ export class CritiquePortAdapter implements ICritiqueModule {
     }
 
     if (loopResult.verdict === 'fail') {
+      const correctionFindings = loopResult.correction.findings.map(finding => ({
+        evaluator: 'critique-loop',
+        severity: finding.severity,
+        message: finding.message,
+      }));
       const normalizedFindings = findings.length > 0
         ? findings
-        : [{ evaluator: 'critique-loop', severity: 'high', message: loopResult.correction.summary }];
+        : correctionFindings.length > 0
+          ? correctionFindings
+          : [{ evaluator: 'critique-loop', severity: 'high', message: loopResult.correction.summary }];
       return {
         verdict: 'fail',
         findings: normalizedFindings,

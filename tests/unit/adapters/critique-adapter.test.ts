@@ -100,4 +100,50 @@ describe('CritiquePortAdapter', () => {
       findings: [{ evaluator: 'Logic', severity: 'high', message: 'Missing step' }],
     });
   });
+
+  it('uses correction findings when iteration results are empty', async () => {
+    const loop = {
+      run: vi.fn().mockResolvedValue({
+        verdict: 'fail',
+        iterations: [
+          {
+            index: 0,
+            input: { content: 'plan', metadata: {} },
+            result: {
+              verdict: 'fail',
+              overallScore: 0.2,
+              shortCircuited: false,
+              results: [],
+            },
+            completedAt: '2026-03-05T00:00:00.000Z',
+          },
+        ],
+        correction: {
+          summary: 'Fix the plan',
+          findings: [{ message: 'Missing coverage', severity: 'medium' }],
+          score: 0.2,
+          iterationCount: 1,
+        },
+      }),
+    };
+
+    const adapter = new CritiquePortAdapter({
+      loop,
+      config: {
+        maxIterations: 1,
+        tokenBudget: 1000,
+        consensusThreshold: 2,
+        sessionId: 'sess-1',
+        taskId: 'plan-review',
+      },
+    });
+
+    const result = await adapter.reviewPlan(plan);
+
+    expect(result).toEqual({
+      verdict: 'fail',
+      score: 0.2,
+      findings: [{ evaluator: 'critique-loop', severity: 'medium', message: 'Missing coverage' }],
+    });
+  });
 });
