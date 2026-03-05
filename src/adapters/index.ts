@@ -1,4 +1,5 @@
 export * from './firewall-adapter.js';
+export * from './adapter-llm-client.js';
 export * from './skills-adapter.js';
 export * from './memory-adapter.js';
 export * from './planner-adapter.js';
