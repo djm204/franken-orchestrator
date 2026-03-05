@@ -64,6 +64,9 @@ export class SkillsPortAdapter implements ISkillsModule {
         const result = await this.mcp.callTool(skillId, input);
         return { output: result };
       }
+      case 'cli': {
+        throw new Error(`CLI execution not yet implemented for skill: ${skillId}`);
+      }
       default: {
         const _exhaustive: never = descriptor.executionType;
         throw new Error(`Unsupported execution type: ${_exhaustive}`);

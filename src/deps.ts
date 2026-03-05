@@ -41,7 +41,7 @@ export interface SkillDescriptor {
   readonly id: string;
   readonly name: string;
   readonly requiresHitl: boolean;
-  readonly executionType: 'llm' | 'function' | 'mcp';
+  readonly executionType: 'llm' | 'function' | 'mcp' | 'cli';
 }
 
 export interface SkillInput {
