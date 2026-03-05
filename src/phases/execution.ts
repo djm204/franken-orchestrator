@@ -7,6 +7,7 @@ import type {
   PlanTask,
   SkillInput,
   IMcpModule,
+  MemoryContext,
 } from '../deps.js';
 import type { TaskOutcome } from '../types.js';
 
@@ -139,11 +140,7 @@ async function executeTask(
       }
     }
 
-    const memoryContext = ctx.sanitizedIntent?.context ?? {
-      adrs: [],
-      knownErrors: [],
-      rules: [],
-    };
+    const memoryContext = resolveMemoryContext(ctx.sanitizedIntent?.context);
 
     const baseInput: SkillInput = {
       objective: task.objective,
@@ -213,4 +210,23 @@ async function executeTask(
   } finally {
     span.end({ taskId: task.id });
   }
+}
+
+function resolveMemoryContext(
+  context: Record<string, unknown> | undefined,
+): MemoryContext {
+  if (
+    context &&
+    Array.isArray(context.adrs) &&
+    Array.isArray(context.knownErrors) &&
+    Array.isArray(context.rules)
+  ) {
+    return {
+      adrs: context.adrs as string[],
+      knownErrors: context.knownErrors as string[],
+      rules: context.rules as string[],
+    };
+  }
+
+  return { adrs: [], knownErrors: [], rules: [] };
 }

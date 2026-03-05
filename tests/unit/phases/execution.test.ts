@@ -192,6 +192,25 @@ describe('runExecution', () => {
     expect((complete!.detail as { tokensUsed: number }).tokensUsed).toBe(8);
   });
 
+  it('returns the last skill output when multiple skills run sequentially', async () => {
+    const execute = vi
+      .fn()
+      .mockResolvedValueOnce({ output: 'alpha-result', tokensUsed: 1 })
+      .mockResolvedValueOnce({ output: 'beta-result', tokensUsed: 1 });
+    const skills = makeSkills({
+      hasSkill: vi.fn(() => true),
+      execute,
+    });
+    const c = ctx([
+      { id: 't1', objective: 'multi', requiredSkills: ['alpha', 'beta'], dependsOn: [] },
+    ]);
+
+    const outcomes = await runExecution(c, skills, makeGovernor(), makeMemory(), makeObserver());
+
+    expect(execute.mock.calls.map(call => call[0])).toEqual(['alpha', 'beta']);
+    expect(outcomes[0]!.output).toBe('beta-result');
+  });
+
   it('uses empty memory context when sanitizedIntent is undefined', async () => {
     const execute = vi.fn(async () => ({ output: 'ok', tokensUsed: 0 }));
     const skills = makeSkills({
