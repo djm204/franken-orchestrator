@@ -113,4 +113,98 @@ describe('runExecution', () => {
     expect(done).toBeDefined();
     expect((done!.detail as { succeeded: number }).succeeded).toBe(1);
   });
+
+  it('threads dependency outputs into downstream skill input', async () => {
+    const execute = vi.fn(async (skillId: string) => ({
+      output: `${skillId}-output`,
+      tokensUsed: 2,
+    }));
+    const skills = makeSkills({
+      hasSkill: vi.fn(() => true),
+      execute,
+    });
+    const c = ctx([
+      { id: 't1', objective: 'first', requiredSkills: ['alpha'], dependsOn: [] },
+      { id: 't2', objective: 'second', requiredSkills: ['beta'], dependsOn: ['t1'] },
+    ]);
+
+    await runExecution(c, skills, makeGovernor(), makeMemory(), makeObserver());
+
+    const secondCall = execute.mock.calls[1]!;
+    const secondInput = secondCall[1];
+    expect(secondInput.dependencyOutputs.get('t1')).toBe('alpha-output');
+  });
+
+  it('passes through dependency output when no skills are required', async () => {
+    const execute = vi.fn(async (skillId: string) => ({
+      output: `${skillId}-output`,
+      tokensUsed: 1,
+    }));
+    const skills = makeSkills({
+      hasSkill: vi.fn(() => true),
+      execute,
+    });
+    const c = ctx([
+      { id: 't1', objective: 'first', requiredSkills: ['alpha'], dependsOn: [] },
+      { id: 't2', objective: 'second', requiredSkills: [], dependsOn: ['t1'] },
+    ]);
+
+    const outcomes = await runExecution(c, skills, makeGovernor(), makeMemory(), makeObserver());
+
+    expect(execute).toHaveBeenCalledTimes(1);
+    expect(outcomes[1]!.output).toBe('alpha-output');
+  });
+
+  it('fails when a required skill is missing and records failure trace', async () => {
+    const memory = makeMemory();
+    const skills = makeSkills({
+      hasSkill: vi.fn(() => false),
+    });
+    const c = ctx([
+      { id: 't1', objective: 'missing', requiredSkills: ['ghost'], dependsOn: [] },
+    ]);
+
+    const outcomes = await runExecution(c, skills, makeGovernor(), memory, makeObserver());
+
+    expect(outcomes[0]!.status).toBe('failure');
+    expect(outcomes[0]!.error).toContain('ghost');
+    expect(memory.recordTrace).toHaveBeenCalledWith(
+      expect.objectContaining({ taskId: 't1', outcome: 'failure' }),
+    );
+  });
+
+  it('aggregates tokensUsed across multiple skills for audit', async () => {
+    const skills = makeSkills({
+      hasSkill: vi.fn(() => true),
+      execute: vi
+        .fn()
+        .mockResolvedValueOnce({ output: 'first', tokensUsed: 3 })
+        .mockResolvedValueOnce({ output: 'second', tokensUsed: 5 }),
+    });
+    const c = ctx([
+      { id: 't1', objective: 'multi', requiredSkills: ['a', 'b'], dependsOn: [] },
+    ]);
+
+    await runExecution(c, skills, makeGovernor(), makeMemory(), makeObserver());
+
+    const complete = c.audit.find(a => a.action === 'task:complete');
+    expect(complete).toBeDefined();
+    expect((complete!.detail as { tokensUsed: number }).tokensUsed).toBe(8);
+  });
+
+  it('uses empty memory context when sanitizedIntent is undefined', async () => {
+    const execute = vi.fn(async () => ({ output: 'ok', tokensUsed: 0 }));
+    const skills = makeSkills({
+      hasSkill: vi.fn(() => true),
+      execute,
+    });
+    const c = ctx([
+      { id: 't1', objective: 'no context', requiredSkills: ['alpha'], dependsOn: [] },
+    ]);
+
+    await runExecution(c, skills, makeGovernor(), makeMemory(), makeObserver());
+
+    const input = execute.mock.calls[0]![1];
+    expect(input.context).toEqual({ adrs: [], knownErrors: [], rules: [] });
+  });
 });

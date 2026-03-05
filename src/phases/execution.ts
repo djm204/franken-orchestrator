@@ -5,6 +5,8 @@ import type {
   IMemoryModule,
   IObserverModule,
   PlanTask,
+  SkillInput,
+  IMcpModule,
 } from '../deps.js';
 import type { TaskOutcome } from '../types.js';
 
@@ -29,6 +31,7 @@ export async function runExecution(
   governor: IGovernorModule,
   memory: IMemoryModule,
   observer: IObserverModule,
+  mcp?: IMcpModule,
 ): Promise<readonly TaskOutcome[]> {
   ctx.phase = 'execution';
   ctx.addAudit('orchestrator', 'phase:start', { phase: 'execution' });
@@ -39,6 +42,7 @@ export async function runExecution(
 
   const outcomes: TaskOutcome[] = [];
   const completed = new Set<string>();
+  const completedOutputs = new Map<string, unknown>();
 
   // Simple topological execution: iterate tasks, skip those with unmet deps
   const pending = [...ctx.plan.tasks];
@@ -64,11 +68,21 @@ export async function runExecution(
     }
 
     const task = pending.splice(readyIndex, 1)[0]!;
-    const outcome = await executeTask(task, skills, governor, memory, observer, ctx);
+    const outcome = await executeTask(
+      task,
+      skills,
+      governor,
+      memory,
+      observer,
+      ctx,
+      completedOutputs,
+      mcp,
+    );
     outcomes.push(outcome);
 
     if (outcome.status === 'success') {
       completed.add(task.id);
+      completedOutputs.set(task.id, outcome.output);
     }
   }
 
@@ -89,6 +103,8 @@ async function executeTask(
   memory: IMemoryModule,
   observer: IObserverModule,
   ctx: BeastContext,
+  completedOutputs: ReadonlyMap<string, unknown>,
+  _mcp?: IMcpModule,
 ): Promise<TaskOutcome> {
   const span = observer.startSpan(`task:${task.id}`);
 
@@ -116,6 +132,64 @@ async function executeTask(
     // Execute (placeholder — real execution calls skill registry)
     ctx.addAudit('executor', 'task:start', { taskId: task.id, objective: task.objective });
 
+    const dependencyOutputs = new Map<string, unknown>();
+    for (const dep of task.dependsOn) {
+      if (completedOutputs.has(dep)) {
+        dependencyOutputs.set(dep, completedOutputs.get(dep));
+      }
+    }
+
+    const memoryContext = ctx.sanitizedIntent?.context ?? {
+      adrs: [],
+      knownErrors: [],
+      rules: [],
+    };
+
+    const baseInput: SkillInput = {
+      objective: task.objective,
+      context: memoryContext,
+      dependencyOutputs,
+      sessionId: ctx.sessionId,
+      projectId: ctx.projectId,
+    };
+
+    if (task.requiredSkills.length === 0) {
+      const passthroughOutput =
+        dependencyOutputs.size === 1
+          ? dependencyOutputs.values().next().value
+          : dependencyOutputs;
+
+      await memory.recordTrace({
+        taskId: task.id,
+        summary: task.objective,
+        outcome: 'success',
+        timestamp: new Date().toISOString(),
+      });
+
+      ctx.addAudit('executor', 'task:complete', {
+        taskId: task.id,
+        tokensUsed: 0,
+        output: passthroughOutput,
+      });
+
+      return { taskId: task.id, status: 'success', output: passthroughOutput };
+    }
+
+    for (const skillId of task.requiredSkills) {
+      if (!skills.hasSkill(skillId)) {
+        throw new Error(`Missing required skill: ${skillId}`);
+      }
+    }
+
+    let output: unknown;
+    let tokensUsed = 0;
+
+    for (const skillId of task.requiredSkills) {
+      const result = await skills.execute(skillId, baseInput);
+      output = result.output;
+      tokensUsed += result.tokensUsed ?? 0;
+    }
+
     // Record trace
     await memory.recordTrace({
       taskId: task.id,
@@ -124,11 +198,17 @@ async function executeTask(
       timestamp: new Date().toISOString(),
     });
 
-    ctx.addAudit('executor', 'task:complete', { taskId: task.id });
-    return { taskId: task.id, status: 'success' };
+    ctx.addAudit('executor', 'task:complete', { taskId: task.id, tokensUsed, output });
+    return { taskId: task.id, status: 'success', output };
   } catch (error) {
     const errorMsg = error instanceof Error ? error.message : String(error);
     ctx.addAudit('executor', 'task:failed', { taskId: task.id, error: errorMsg });
+    await memory.recordTrace({
+      taskId: task.id,
+      summary: task.objective,
+      outcome: 'failure',
+      timestamp: new Date().toISOString(),
+    });
     return { taskId: task.id, status: 'failure', error: errorMsg };
   } finally {
     span.end({ taskId: task.id });

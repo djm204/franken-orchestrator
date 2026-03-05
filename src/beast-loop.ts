@@ -48,6 +48,7 @@ export class BeastLoop {
         this.deps.governor,
         this.deps.memory,
         this.deps.observer,
+        this.deps.mcp,
       );
 
       // Phase 4: Closure
