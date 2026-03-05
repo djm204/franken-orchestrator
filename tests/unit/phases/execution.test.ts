@@ -242,6 +242,20 @@ describe('runExecution', () => {
     expect((complete!.detail as { tokensUsed: number }).tokensUsed).toBe(8);
   });
 
+  it('sets task outcome output from skill result', async () => {
+    const skills = makeSkills({
+      hasSkill: vi.fn(() => true),
+      execute: vi.fn(async () => ({ output: 'skill-result', tokensUsed: 2 })),
+    });
+    const c = ctx([
+      { id: 't1', objective: 'single', requiredSkills: ['alpha'], dependsOn: [] },
+    ]);
+
+    const outcomes = await runExecution(c, skills, makeGovernor(), makeMemory(), makeObserver());
+
+    expect(outcomes[0]!.output).toBe('skill-result');
+  });
+
   it('returns the last skill output when multiple skills run sequentially', async () => {
     const execute = vi
       .fn()
