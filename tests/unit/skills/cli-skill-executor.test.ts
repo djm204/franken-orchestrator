@@ -1,0 +1,328 @@
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+import type { RalphLoopConfig, IterationResult, CliSkillConfig, GitIsolationConfig } from '../../../src/skills/cli-types.js';
+import type { SkillInput } from '../../../src/deps.js';
+
+// ── Factories ──
+
+function makeSkillInput(overrides?: Partial<SkillInput>): SkillInput {
+  return {
+    objective: 'Test objective',
+    context: { adrs: [], knownErrors: [], rules: [] },
+    dependencyOutputs: new Map(),
+    sessionId: 'session-1',
+    projectId: 'project-1',
+    ...overrides,
+  };
+}
+
+function makeRalphConfig(overrides?: Partial<RalphLoopConfig>): RalphLoopConfig {
+  return {
+    prompt: 'Implement the feature',
+    promiseTag: 'IMPL_01_DONE',
+    maxIterations: 5,
+    maxTurns: 10,
+    provider: 'claude',
+    claudeCmd: 'claude',
+    codexCmd: 'codex',
+    timeoutMs: 60000,
+    ...overrides,
+  };
+}
+
+function makeGitConfig(overrides?: Partial<GitIsolationConfig>): GitIsolationConfig {
+  return {
+    baseBranch: 'main',
+    branchPrefix: 'feat/',
+    autoCommit: true,
+    workingDir: '/fake/repo',
+    ...overrides,
+  };
+}
+
+function makeCliConfig(overrides?: {
+  ralph?: Partial<RalphLoopConfig>;
+  git?: Partial<GitIsolationConfig>;
+  budgetLimitUsd?: number;
+}): CliSkillConfig {
+  return {
+    ralph: makeRalphConfig(overrides?.ralph),
+    git: makeGitConfig(overrides?.git),
+    budgetLimitUsd: overrides?.budgetLimitUsd,
+  };
+}
+
+function makeIterResult(overrides?: Partial<IterationResult>): IterationResult {
+  return {
+    iteration: 1,
+    exitCode: 0,
+    stdout: 'test output',
+    stderr: '',
+    durationMs: 1000,
+    rateLimited: false,
+    promiseDetected: false,
+    tokensEstimated: 100,
+    ...overrides,
+  };
+}
+
+function makeMockRalph() {
+  return {
+    run: vi.fn().mockResolvedValue({
+      completed: true,
+      iterations: 1,
+      output: 'completed output',
+      tokensUsed: 100,
+    }),
+  };
+}
+
+function makeMockGit() {
+  return {
+    isolate: vi.fn(),
+    merge: vi.fn().mockReturnValue({ merged: true, commits: 3 }),
+    autoCommit: vi.fn(),
+    hasMeaningfulChange: vi.fn(),
+    getCurrentHead: vi.fn(),
+  };
+}
+
+function makeMockObserver() {
+  let spanCount = 0;
+  return {
+    trace: { id: 'trace-1' },
+    counter: {
+      grandTotal: vi.fn().mockReturnValue({ promptTokens: 0, completionTokens: 0, totalTokens: 0 }),
+      allModels: vi.fn().mockReturnValue([] as string[]),
+      totalsFor: vi.fn().mockReturnValue({ promptTokens: 0, completionTokens: 0, totalTokens: 0 }),
+    },
+    costCalc: {
+      totalCost: vi.fn().mockReturnValue(0),
+    },
+    breaker: {
+      check: vi.fn().mockReturnValue({ tripped: false, limitUsd: 10, spendUsd: 0 }),
+    },
+    loopDetector: {
+      check: vi.fn().mockReturnValue({ detected: false }),
+    },
+    startSpan: vi.fn().mockImplementation(() => ({ id: `span-${spanCount++}` })),
+    endSpan: vi.fn(),
+    recordTokenUsage: vi.fn(),
+    setMetadata: vi.fn(),
+  };
+}
+
+// ── Tests ──
+
+describe('CliSkillExecutor', () => {
+  let ralph: ReturnType<typeof makeMockRalph>;
+  let git: ReturnType<typeof makeMockGit>;
+  let observer: ReturnType<typeof makeMockObserver>;
+
+  beforeEach(() => {
+    ralph = makeMockRalph();
+    git = makeMockGit();
+    observer = makeMockObserver();
+  });
+
+  async function createAndExecute(
+    skillId = 'cli:01_types',
+    input = makeSkillInput(),
+    config = makeCliConfig(),
+  ) {
+    const { CliSkillExecutor } = await import('../../../src/skills/cli-skill-executor.js');
+    const executor = new CliSkillExecutor(ralph as any, git as any, observer);
+    return executor.execute(skillId, input, config);
+  }
+
+  describe('successful execution (promise detected)', () => {
+    it('returns SkillResult with output and tokensUsed', async () => {
+      ralph.run.mockImplementation(async (config: RalphLoopConfig) => {
+        config.onIteration?.(1, makeIterResult({ promiseDetected: true, tokensEstimated: 250 }));
+        return { completed: true, iterations: 1, output: '<promise>IMPL_01_DONE</promise>', tokensUsed: 250 };
+      });
+      observer.counter.grandTotal
+        .mockReturnValueOnce({ promptTokens: 0, completionTokens: 0, totalTokens: 0 })
+        .mockReturnValue({ promptTokens: 50, completionTokens: 250, totalTokens: 300 });
+
+      const result = await createAndExecute();
+
+      expect(result.output).toBe('<promise>IMPL_01_DONE</promise>');
+      expect(result.tokensUsed).toBe(300);
+    });
+  });
+
+  describe('failed execution (max iterations)', () => {
+    it('returns SkillResult with output when ralph loop does not complete', async () => {
+      ralph.run.mockResolvedValue({
+        completed: false,
+        iterations: 5,
+        output: 'partial output',
+        tokensUsed: 500,
+      });
+
+      const result = await createAndExecute();
+
+      expect(result.output).toBe('partial output');
+      expect(result.tokensUsed).toBeDefined();
+    });
+  });
+
+  describe('budget exceeded mid-loop', () => {
+    it('stops loop early and returns partial result', async () => {
+      observer.breaker.check
+        .mockReturnValueOnce({ tripped: false, limitUsd: 10, spendUsd: 0 })
+        .mockReturnValue({ tripped: true, limitUsd: 10, spendUsd: 11 });
+
+      ralph.run.mockImplementation(async (config: RalphLoopConfig) => {
+        config.onIteration?.(1, makeIterResult({ tokensEstimated: 5000 }));
+        // BudgetExceededError thrown in onIteration — this line should not be reached
+        return { completed: true, iterations: 1, output: 'done', tokensUsed: 5000 };
+      });
+
+      const result = await createAndExecute();
+
+      expect(result.output).toContain('Budget exceeded');
+      expect(git.merge).not.toHaveBeenCalled();
+      expect(observer.endSpan).toHaveBeenCalledWith(
+        expect.any(Object),
+        expect.objectContaining({ errorMessage: 'budget-exceeded' }),
+      );
+    });
+  });
+
+  describe('observer span creation per iteration', () => {
+    it('creates a span for each iteration via onIteration callback', async () => {
+      ralph.run.mockImplementation(async (config: RalphLoopConfig) => {
+        config.onIteration?.(1, makeIterResult({ iteration: 1 }));
+        config.onIteration?.(2, makeIterResult({ iteration: 2 }));
+        config.onIteration?.(3, makeIterResult({ iteration: 3, promiseDetected: true }));
+        return { completed: true, iterations: 3, output: 'done', tokensUsed: 300 };
+      });
+
+      await createAndExecute();
+
+      // 1 chunk span + 3 iteration spans = 4 startSpan calls
+      expect(observer.startSpan).toHaveBeenCalledTimes(4);
+      expect(observer.startSpan).toHaveBeenCalledWith(
+        observer.trace,
+        expect.objectContaining({ name: 'cli:01_types:iter-1' }),
+      );
+      expect(observer.startSpan).toHaveBeenCalledWith(
+        observer.trace,
+        expect.objectContaining({ name: 'cli:01_types:iter-2' }),
+      );
+      expect(observer.startSpan).toHaveBeenCalledWith(
+        observer.trace,
+        expect.objectContaining({ name: 'cli:01_types:iter-3' }),
+      );
+    });
+  });
+
+  describe('token recording per iteration', () => {
+    it('calls recordTokenUsage for each iteration', async () => {
+      ralph.run.mockImplementation(async (config: RalphLoopConfig) => {
+        config.onIteration?.(1, makeIterResult({ iteration: 1, tokensEstimated: 100 }));
+        config.onIteration?.(2, makeIterResult({ iteration: 2, tokensEstimated: 200 }));
+        return { completed: true, iterations: 2, output: 'done', tokensUsed: 300 };
+      });
+
+      await createAndExecute();
+
+      expect(observer.recordTokenUsage).toHaveBeenCalledTimes(2);
+      expect(observer.recordTokenUsage).toHaveBeenCalledWith(
+        expect.any(Object),
+        expect.objectContaining({ completionTokens: 100 }),
+        observer.counter,
+      );
+      expect(observer.recordTokenUsage).toHaveBeenCalledWith(
+        expect.any(Object),
+        expect.objectContaining({ completionTokens: 200 }),
+        observer.counter,
+      );
+    });
+  });
+
+  describe('git branch isolation lifecycle', () => {
+    it('calls git.isolate before ralph.run and git.merge after', async () => {
+      const callOrder: string[] = [];
+
+      git.isolate.mockImplementation(() => { callOrder.push('isolate'); });
+      ralph.run.mockImplementation(async () => {
+        callOrder.push('ralph.run');
+        return { completed: true, iterations: 1, output: 'done', tokensUsed: 100 };
+      });
+      git.merge.mockImplementation(() => {
+        callOrder.push('merge');
+        return { merged: true, commits: 1 };
+      });
+
+      await createAndExecute();
+
+      expect(callOrder).toEqual(['isolate', 'ralph.run', 'merge']);
+    });
+
+    it('extracts chunkId from skillId for git operations', async () => {
+      await createAndExecute('cli:03_git_branch_isolator');
+
+      expect(git.isolate).toHaveBeenCalledWith('03_git_branch_isolator');
+      expect(git.merge).toHaveBeenCalledWith('03_git_branch_isolator');
+    });
+  });
+
+  describe('error propagation from RalphLoop', () => {
+    it('wraps RalphLoop errors with chunk context', async () => {
+      ralph.run.mockRejectedValue(new Error('spawn ENOENT'));
+
+      await expect(createAndExecute()).rejects.toThrow(/RalphLoop.*01_types.*spawn ENOENT/);
+    });
+  });
+
+  describe('error propagation from GitBranchIsolator', () => {
+    it('wraps git.isolate errors with chunk context', async () => {
+      git.isolate.mockImplementation(() => { throw new Error('branch already exists'); });
+
+      await expect(createAndExecute()).rejects.toThrow(/Git isolation.*01_types.*branch already exists/);
+    });
+  });
+
+  describe('merge conflict handling', () => {
+    it('returns SkillResult with output even when git.merge fails', async () => {
+      git.merge.mockImplementation(() => { throw new Error('merge conflict in file.ts'); });
+
+      const result = await createAndExecute();
+
+      expect(result.output).toBe('completed output');
+      expect(result.tokensUsed).toBeDefined();
+      expect(observer.setMetadata).toHaveBeenCalledWith(
+        expect.any(Object),
+        expect.objectContaining({ mergeError: expect.stringContaining('merge conflict') }),
+      );
+    });
+  });
+
+  describe('config validation', () => {
+    it('rejects empty skillId', async () => {
+      await expect(createAndExecute('')).rejects.toThrow(/skillId/i);
+    });
+
+    it('uses full skillId as chunkId when no colon present', async () => {
+      await createAndExecute('01_types');
+
+      expect(git.isolate).toHaveBeenCalledWith('01_types');
+      expect(git.merge).toHaveBeenCalledWith('01_types');
+    });
+  });
+
+  describe('budget exceeded before loop starts', () => {
+    it('returns immediately without calling ralph.run or git.isolate', async () => {
+      observer.breaker.check.mockReturnValue({ tripped: true, limitUsd: 10, spendUsd: 12 });
+
+      const result = await createAndExecute();
+
+      expect(git.isolate).not.toHaveBeenCalled();
+      expect(ralph.run).not.toHaveBeenCalled();
+      expect(result.output).toContain('Budget exceeded');
+      expect(result.tokensUsed).toBe(0);
+    });
+  });
+});
