@@ -275,6 +275,27 @@ describe('runExecution', () => {
     expect(outcomes[0]!.output).toBe('beta-result');
   });
 
+  it('fails when skill execution throws and records failure trace', async () => {
+    const skills = makeSkills({
+      hasSkill: vi.fn(() => true),
+      execute: vi.fn(async () => {
+        throw new Error('boom');
+      }),
+    });
+    const memory = makeMemory();
+    const c = ctx([
+      { id: 't1', objective: 'explode', requiredSkills: ['alpha'], dependsOn: [] },
+    ]);
+
+    const outcomes = await runExecution(c, skills, makeGovernor(), memory, makeObserver());
+
+    expect(outcomes[0]!.status).toBe('failure');
+    expect(outcomes[0]!.error).toContain('boom');
+    expect(memory.recordTrace).toHaveBeenCalledWith(
+      expect.objectContaining({ taskId: 't1', outcome: 'failure' }),
+    );
+  });
+
   it('uses empty memory context when sanitizedIntent is undefined', async () => {
     const execute = vi.fn(async () => ({ output: 'ok', tokensUsed: 0 }));
     const skills = makeSkills({
