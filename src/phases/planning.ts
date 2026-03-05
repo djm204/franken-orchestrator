@@ -1,6 +1,7 @@
 import type { BeastContext } from '../context/franken-context.js';
-import type { IPlannerModule, ICritiqueModule } from '../deps.js';
+import type { IPlannerModule, ICritiqueModule, ILogger } from '../deps.js';
 import type { OrchestratorConfig } from '../config/orchestrator-config.js';
+import { NullLogger } from '../logger.js';
 
 export class CritiqueSpiralError extends Error {
   constructor(
@@ -22,9 +23,12 @@ export async function runPlanning(
   planner: IPlannerModule,
   critique: ICritiqueModule,
   config: OrchestratorConfig,
+  logger: ILogger = new NullLogger(),
 ): Promise<void> {
   ctx.phase = 'planning';
   ctx.addAudit('orchestrator', 'phase:start', { phase: 'planning' });
+  logger.info('Planning: start', { phase: 'planning' });
+  logger.debug('Planning: sanitized intent', { sanitizedIntent: ctx.sanitizedIntent });
 
   if (!ctx.sanitizedIntent) {
     throw new Error('Cannot plan without sanitizedIntent — ingestion phase incomplete');
@@ -33,6 +37,9 @@ export async function runPlanning(
   let lastScore = 0;
 
   for (let i = 0; i < config.maxCritiqueIterations; i++) {
+    if (i > 0) {
+      logger.info('Planning: replan', { iteration: i + 1 });
+    }
     // Create or re-create plan
     const plan = await planner.createPlan({
       goal: ctx.sanitizedIntent.goal,
@@ -45,6 +52,8 @@ export async function runPlanning(
       iteration: i + 1,
       taskCount: plan.tasks.length,
     });
+    logger.info('Planning: plan created', { iteration: i + 1, taskCount: plan.tasks.length });
+    logger.debug('Planning: plan raw', { plan });
 
     // Critique the plan
     const critiqueResult = await critique.reviewPlan(plan);
@@ -56,6 +65,12 @@ export async function runPlanning(
       score: critiqueResult.score,
       findingsCount: critiqueResult.findings.length,
     });
+    logger.info('Planning: critique reviewed', {
+      iteration: i + 1,
+      verdict: critiqueResult.verdict,
+      score: critiqueResult.score,
+    });
+    logger.debug('Planning: critique findings', { findings: critiqueResult.findings });
 
     if (critiqueResult.verdict === 'pass' && critiqueResult.score >= config.minCritiqueScore) {
       return; // Plan approved

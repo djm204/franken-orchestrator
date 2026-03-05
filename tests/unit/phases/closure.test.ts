@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { runClosure } from '../../../src/phases/closure.js';
 import { BeastContext } from '../../../src/context/franken-context.js';
-import { makeObserver, makeHeartbeat } from '../../helpers/stubs.js';
+import { makeObserver, makeHeartbeat, makeLogger } from '../../helpers/stubs.js';
 import { defaultConfig } from '../../../src/config/orchestrator-config.js';
 import type { TaskOutcome } from '../../../src/types.js';
 
@@ -92,5 +92,29 @@ describe('runClosure', () => {
 
     expect(c.audit.some(a => a.action === 'tokenSpend:collected')).toBe(true);
     expect(c.audit.some(a => a.action === 'pulse:complete')).toBe(true);
+  });
+
+  it('logs token spend and heartbeat result', async () => {
+    const logger = makeLogger();
+    const observer = makeObserver({
+      getTokenSpend: vi.fn(async () => ({
+        inputTokens: 10,
+        outputTokens: 20,
+        totalTokens: 30,
+        estimatedCostUsd: 0.01,
+      })),
+    });
+    const heartbeat = makeHeartbeat();
+
+    await runClosure(ctx(), observer, heartbeat, defaultConfig(), successOutcomes, logger);
+
+    expect(logger.info).toHaveBeenCalledWith(
+      'Closure: token spend',
+      expect.objectContaining({ totalTokens: 30, estimatedCostUsd: 0.01 }),
+    );
+    expect(logger.info).toHaveBeenCalledWith(
+      'Closure: heartbeat pulse',
+      expect.objectContaining({ improvements: 0, techDebt: 0 }),
+    );
   });
 });

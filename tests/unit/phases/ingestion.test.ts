@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { runIngestion, InjectionDetectedError } from '../../../src/phases/ingestion.js';
 import { BeastContext } from '../../../src/context/franken-context.js';
-import { makeFirewall } from '../../helpers/stubs.js';
+import { makeFirewall, makeLogger } from '../../helpers/stubs.js';
 
 function ctx(input = 'build a feature'): BeastContext {
   return new BeastContext('proj', 'sess', input);
@@ -101,5 +101,28 @@ describe('runIngestion', () => {
 
     const blockedAudit = c.audit.find(a => a.action === 'pipeline:blocked');
     expect(blockedAudit).toBeDefined();
+  });
+
+  it('logs input length and firewall results', async () => {
+    const logger = makeLogger();
+    const firewall = makeFirewall({
+      runPipeline: vi.fn(async () => ({
+        sanitizedText: 'safe',
+        violations: [{ rule: 'pii', severity: 'warn' as const, detail: 'masked' }],
+        blocked: false,
+      })),
+    });
+    const c = ctx('hello');
+
+    await runIngestion(c, firewall, logger);
+
+    expect(logger.info).toHaveBeenCalledWith(
+      'Ingestion: input received',
+      expect.objectContaining({ inputLength: 5 }),
+    );
+    expect(logger.info).toHaveBeenCalledWith(
+      'Ingestion: firewall result',
+      expect.objectContaining({ blocked: false, violations: expect.any(Array) }),
+    );
   });
 });

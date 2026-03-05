@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { runHydration } from '../../../src/phases/hydration.js';
 import { BeastContext } from '../../../src/context/franken-context.js';
-import { makeMemory } from '../../helpers/stubs.js';
+import { makeLogger, makeMemory } from '../../helpers/stubs.js';
 
 function ctx(): BeastContext {
   const c = new BeastContext('proj', 'sess', 'input');
@@ -70,5 +70,24 @@ describe('runHydration', () => {
     expect(c.audit).toHaveLength(2);
     expect(c.audit[0]!.action).toBe('frontload:start');
     expect(c.audit[1]!.action).toBe('frontload:done');
+  });
+
+  it('logs context counts', async () => {
+    const logger = makeLogger();
+    const memory = makeMemory({
+      getContext: vi.fn(async () => ({
+        adrs: ['ADR-1'],
+        knownErrors: ['Oops'],
+        rules: ['Rule-1', 'Rule-2'],
+      })),
+    });
+    const c = ctx();
+
+    await runHydration(c, memory, logger);
+
+    expect(logger.info).toHaveBeenCalledWith(
+      'Hydration: context loaded',
+      expect.objectContaining({ adrs: 1, rules: 2 }),
+    );
   });
 });

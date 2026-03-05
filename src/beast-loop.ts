@@ -29,19 +29,38 @@ export class BeastLoop {
 
   async run(input: BeastInput): Promise<BeastResult> {
     const ctx = createContext(input);
+    const logger = this.deps.logger;
+    logger.info('BeastLoop: session start', {
+      sessionId: ctx.sessionId,
+      projectId: ctx.projectId,
+    });
+    logger.debug('BeastLoop: session context', {
+      sessionId: ctx.sessionId,
+      projectId: ctx.projectId,
+    });
+    logger.debug('BeastLoop: input', { input });
+    logger.debug('BeastLoop: config', this.config);
 
     try {
       // Phase 1: Ingestion + Hydration
       if (this.config.enableTracing) {
         this.deps.observer.startTrace(ctx.sessionId);
       }
-      await runIngestion(ctx, this.deps.firewall);
-      await runHydration(ctx, this.deps.memory);
+      logger.info('BeastLoop: phase start', { phase: 'ingestion' });
+      await runIngestion(ctx, this.deps.firewall, logger);
+      logger.info('BeastLoop: phase end', { phase: 'ingestion' });
+
+      logger.info('BeastLoop: phase start', { phase: 'hydration' });
+      await runHydration(ctx, this.deps.memory, logger);
+      logger.info('BeastLoop: phase end', { phase: 'hydration' });
 
       // Phase 2: Planning + Critique
-      await runPlanning(ctx, this.deps.planner, this.deps.critique, this.config);
+      logger.info('BeastLoop: phase start', { phase: 'planning' });
+      await runPlanning(ctx, this.deps.planner, this.deps.critique, this.config, logger);
+      logger.info('BeastLoop: phase end', { phase: 'planning' });
 
       // Phase 3: Execution
+      logger.info('BeastLoop: phase start', { phase: 'execution' });
       const outcomes = await runExecution(
         ctx,
         this.deps.skills,
@@ -49,18 +68,29 @@ export class BeastLoop {
         this.deps.memory,
         this.deps.observer,
         this.deps.mcp,
+        logger,
       );
+      logger.info('BeastLoop: phase end', { phase: 'execution' });
 
       // Phase 4: Closure
-      return await runClosure(
+      logger.info('BeastLoop: phase start', { phase: 'closure' });
+      const result = await runClosure(
         ctx,
         this.deps.observer,
         this.deps.heartbeat,
         this.config,
         outcomes,
+        logger,
       );
+      logger.info('BeastLoop: phase end', { phase: 'closure' });
+      logger.info('BeastLoop: session end', {
+        status: result.status,
+        durationMs: result.durationMs,
+      });
+      return result;
     } catch (error) {
       if (error instanceof InjectionDetectedError) {
+        logger.error('BeastLoop: error', { error: error.message });
         return {
           sessionId: ctx.sessionId,
           projectId: ctx.projectId,
@@ -74,6 +104,7 @@ export class BeastLoop {
       }
 
       if (error instanceof CritiqueSpiralError) {
+        logger.error('BeastLoop: error', { error: error.message });
         return {
           sessionId: ctx.sessionId,
           projectId: ctx.projectId,
@@ -86,13 +117,15 @@ export class BeastLoop {
         };
       }
 
+      const err = error instanceof Error ? error : new Error(String(error));
+      logger.error('BeastLoop: error', { error: err.message });
       return {
         sessionId: ctx.sessionId,
         projectId: ctx.projectId,
         phase: ctx.phase,
         status: 'failed',
         tokenSpend: ctx.tokenSpend,
-        error: error instanceof Error ? error : new Error(String(error)),
+        error: err,
         durationMs: ctx.elapsedMs(),
       };
     }

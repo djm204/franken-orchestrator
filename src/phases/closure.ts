@@ -1,7 +1,8 @@
 import type { BeastContext } from '../context/franken-context.js';
-import type { IObserverModule, IHeartbeatModule } from '../deps.js';
+import type { IObserverModule, IHeartbeatModule, ILogger } from '../deps.js';
 import type { BeastResult, TaskOutcome } from '../types.js';
 import type { OrchestratorConfig } from '../config/orchestrator-config.js';
+import { NullLogger } from '../logger.js';
 
 /**
  * Beast Loop Phase 4: Closure
@@ -14,14 +15,23 @@ export async function runClosure(
   heartbeat: IHeartbeatModule,
   config: OrchestratorConfig,
   taskOutcomes: readonly TaskOutcome[],
+  logger: ILogger = new NullLogger(),
 ): Promise<BeastResult> {
   ctx.phase = 'closure';
   ctx.addAudit('orchestrator', 'phase:start', { phase: 'closure' });
+  logger.info('Closure: start', { phase: 'closure' });
 
   // Collect token spend
   const spend = await observer.getTokenSpend(ctx.sessionId);
   ctx.tokenSpend = spend;
   ctx.addAudit('observer', 'tokenSpend:collected', spend);
+  logger.info('Closure: token spend', {
+    inputTokens: spend.inputTokens,
+    outputTokens: spend.outputTokens,
+    totalTokens: spend.totalTokens,
+    estimatedCostUsd: spend.estimatedCostUsd,
+  });
+  logger.debug('Closure: token spend raw', { spend });
 
   // Optional heartbeat pulse
   if (config.enableHeartbeat) {
@@ -31,9 +41,17 @@ export async function runClosure(
         improvements: pulseResult.improvements.length,
         techDebt: pulseResult.techDebt.length,
       });
+      logger.info('Closure: heartbeat pulse', {
+        improvements: pulseResult.improvements.length,
+        techDebt: pulseResult.techDebt.length,
+      });
+      logger.debug('Closure: heartbeat raw', { pulseResult });
     } catch (error) {
       // Heartbeat failure is non-fatal
       ctx.addAudit('heartbeat', 'pulse:failed', {
+        error: error instanceof Error ? error.message : String(error),
+      });
+      logger.error('Closure: heartbeat failed', {
         error: error instanceof Error ? error.message : String(error),
       });
     }

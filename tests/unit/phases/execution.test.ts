@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { runExecution } from '../../../src/phases/execution.js';
 import { BeastContext } from '../../../src/context/franken-context.js';
-import { makeSkills, makeGovernor, makeMemory, makeObserver } from '../../helpers/stubs.js';
+import { makeSkills, makeGovernor, makeMemory, makeObserver, makeLogger } from '../../helpers/stubs.js';
 
 function ctx(tasks = [{ id: 't1', objective: 'do it', requiredSkills: [] as string[], dependsOn: [] as string[] }]): BeastContext {
   const c = new BeastContext('proj', 'sess', 'input');
@@ -328,5 +328,37 @@ describe('runExecution', () => {
 
     const input = execute.mock.calls[0]![1];
     expect(input.context).toEqual({ adrs: [], knownErrors: [], rules: [] });
+  });
+
+  it('logs task start/end, skill ids, and governor decisions', async () => {
+    const logger = makeLogger();
+    const skills = makeSkills({
+      getAvailableSkills: vi.fn(() => [
+        { id: 'deploy', name: 'Deploy', requiresHitl: true },
+      ]),
+      hasSkill: vi.fn(() => true),
+      execute: vi.fn(async () => ({ output: 'done', tokensUsed: 2 })),
+    });
+    const governor = makeGovernor({
+      requestApproval: vi.fn(async () => ({ decision: 'approved' as const })),
+    });
+    const c = ctx([
+      { id: 't1', objective: 'deploy', requiredSkills: ['deploy'], dependsOn: [] },
+    ]);
+
+    await runExecution(c, skills, governor, makeMemory(), makeObserver(), undefined, logger);
+
+    expect(logger.info).toHaveBeenCalledWith(
+      'Execution: task start',
+      expect.objectContaining({ taskId: 't1', skillIds: ['deploy'] }),
+    );
+    expect(logger.info).toHaveBeenCalledWith(
+      'Execution: governor decision',
+      expect.objectContaining({ taskId: 't1', decision: 'approved' }),
+    );
+    expect(logger.info).toHaveBeenCalledWith(
+      'Execution: task complete',
+      expect.objectContaining({ taskId: 't1', status: 'success' }),
+    );
   });
 });

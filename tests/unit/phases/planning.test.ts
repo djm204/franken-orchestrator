@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { runPlanning, CritiqueSpiralError } from '../../../src/phases/planning.js';
 import { BeastContext } from '../../../src/context/franken-context.js';
-import { makePlanner, makeCritique } from '../../helpers/stubs.js';
+import { makePlanner, makeCritique, makeLogger } from '../../helpers/stubs.js';
 import { defaultConfig } from '../../../src/config/orchestrator-config.js';
 
 function ctx(): BeastContext {
@@ -124,5 +124,43 @@ describe('runPlanning', () => {
     const reviewAudits = c.audit.filter(a => a.action === 'plan:reviewed');
     expect(planAudits).toHaveLength(2);
     expect(reviewAudits).toHaveLength(2);
+  });
+
+  it('logs plan creation, critique verdict, and replans', async () => {
+    const c = ctx();
+    const logger = makeLogger();
+    let callCount = 0;
+    const critique = makeCritique({
+      reviewPlan: vi.fn(async () => {
+        callCount++;
+        if (callCount === 1) {
+          return { verdict: 'fail' as const, findings: [], score: 0.2 };
+        }
+        return { verdict: 'pass' as const, findings: [], score: 0.95 };
+      }),
+    });
+    const planner = makePlanner({
+      createPlan: vi.fn(async () => ({
+        tasks: [
+          { id: 't1', objective: 'do it', requiredSkills: [], dependsOn: [] },
+          { id: 't2', objective: 'then this', requiredSkills: [], dependsOn: [] },
+        ],
+      })),
+    });
+
+    await runPlanning(c, planner, critique, defaultConfig(), logger);
+
+    expect(logger.info).toHaveBeenCalledWith(
+      'Planning: plan created',
+      expect.objectContaining({ taskCount: 2, iteration: 1 }),
+    );
+    expect(logger.info).toHaveBeenCalledWith(
+      'Planning: critique reviewed',
+      expect.objectContaining({ verdict: 'pass', score: 0.95 }),
+    );
+    expect(logger.info).toHaveBeenCalledWith(
+      'Planning: replan',
+      expect.objectContaining({ iteration: 2 }),
+    );
   });
 });

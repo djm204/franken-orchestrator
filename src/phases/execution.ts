@@ -8,8 +8,10 @@ import type {
   SkillInput,
   IMcpModule,
   MemoryContext,
+  ILogger,
 } from '../deps.js';
 import type { TaskOutcome } from '../types.js';
+import { NullLogger } from '../logger.js';
 
 export class HitlRejectedError extends Error {
   constructor(
@@ -33,9 +35,11 @@ export async function runExecution(
   memory: IMemoryModule,
   observer: IObserverModule,
   mcp?: IMcpModule,
+  logger: ILogger = new NullLogger(),
 ): Promise<readonly TaskOutcome[]> {
   ctx.phase = 'execution';
   ctx.addAudit('orchestrator', 'phase:start', { phase: 'execution' });
+  logger.info('Execution: start', { phase: 'execution' });
 
   if (!ctx.plan) {
     throw new Error('Cannot execute without a plan — planning phase incomplete');
@@ -78,6 +82,7 @@ export async function runExecution(
       ctx,
       completedOutputs,
       mcp,
+      logger,
     );
     outcomes.push(outcome);
 
@@ -88,6 +93,12 @@ export async function runExecution(
   }
 
   ctx.addAudit('orchestrator', 'execution:done', {
+    total: outcomes.length,
+    succeeded: outcomes.filter(o => o.status === 'success').length,
+    failed: outcomes.filter(o => o.status === 'failure').length,
+    skipped: outcomes.filter(o => o.status === 'skipped').length,
+  });
+  logger.info('Execution: done', {
     total: outcomes.length,
     succeeded: outcomes.filter(o => o.status === 'success').length,
     failed: outcomes.filter(o => o.status === 'failure').length,
@@ -106,8 +117,16 @@ async function executeTask(
   ctx: BeastContext,
   completedOutputs: ReadonlyMap<string, unknown>,
   _mcp?: IMcpModule,
+  logger: ILogger = new NullLogger(),
 ): Promise<TaskOutcome> {
+  const startTime = Date.now();
   const span = observer.startSpan(`task:${task.id}`);
+  logger.info('Execution: task start', {
+    taskId: task.id,
+    skillIds: task.requiredSkills,
+    dependsOn: task.dependsOn,
+  });
+  logger.debug('Execution: task detail', { task });
 
   try {
     // Check HITL requirement
@@ -123,9 +142,18 @@ async function executeTask(
         summary: task.objective,
         requiresHitl: true,
       });
+      logger.info('Execution: governor decision', {
+        taskId: task.id,
+        decision: approval.decision,
+        reason: approval.reason,
+      });
 
       if (approval.decision === 'rejected' || approval.decision === 'abort') {
         ctx.addAudit('governor', 'task:rejected', { taskId: task.id, reason: approval.reason });
+        logger.warn('Execution: task rejected', {
+          taskId: task.id,
+          reason: approval.reason,
+        });
         return { taskId: task.id, status: 'skipped', error: approval.reason ?? 'Rejected' };
       }
     }
@@ -149,6 +177,7 @@ async function executeTask(
       sessionId: ctx.sessionId,
       projectId: ctx.projectId,
     };
+    logger.debug('Execution: skill input', { taskId: task.id, input: baseInput });
 
     if (task.requiredSkills.length === 0) {
       const passthroughOutput =
@@ -168,6 +197,16 @@ async function executeTask(
         tokensUsed: 0,
         output: passthroughOutput,
       });
+      logger.info('Execution: task complete', {
+        taskId: task.id,
+        status: 'success',
+        tokensUsed: 0,
+      });
+      logger.debug('Execution: task timing', {
+        taskId: task.id,
+        durationMs: Date.now() - startTime,
+        tokensUsed: 0,
+      });
 
       return { taskId: task.id, status: 'success', output: passthroughOutput };
     }
@@ -185,6 +224,7 @@ async function executeTask(
       const result = await skills.execute(skillId, baseInput);
       output = result.output;
       tokensUsed += result.tokensUsed ?? 0;
+      logger.debug('Execution: skill complete', { taskId: task.id, skillId, tokensUsed });
     }
 
     // Record trace
@@ -196,15 +236,31 @@ async function executeTask(
     });
 
     ctx.addAudit('executor', 'task:complete', { taskId: task.id, tokensUsed, output });
+    logger.info('Execution: task complete', {
+      taskId: task.id,
+      status: 'success',
+      tokensUsed,
+    });
+    logger.debug('Execution: task timing', {
+      taskId: task.id,
+      durationMs: Date.now() - startTime,
+      tokensUsed,
+    });
     return { taskId: task.id, status: 'success', output };
   } catch (error) {
     const errorMsg = error instanceof Error ? error.message : String(error);
     ctx.addAudit('executor', 'task:failed', { taskId: task.id, error: errorMsg });
+    logger.error('Execution: task failed', { taskId: task.id, error: errorMsg });
     await memory.recordTrace({
       taskId: task.id,
       summary: task.objective,
       outcome: 'failure',
       timestamp: new Date().toISOString(),
+    });
+    logger.debug('Execution: task timing', {
+      taskId: task.id,
+      durationMs: Date.now() - startTime,
+      tokensUsed: 0,
     });
     return { taskId: task.id, status: 'failure', error: errorMsg };
   } finally {

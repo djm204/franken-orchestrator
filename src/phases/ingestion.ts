@@ -1,5 +1,6 @@
 import type { BeastContext } from '../context/franken-context.js';
-import type { IFirewallModule } from '../deps.js';
+import type { IFirewallModule, ILogger } from '../deps.js';
+import { NullLogger } from '../logger.js';
 
 export class InjectionDetectedError extends Error {
   constructor(
@@ -19,14 +20,22 @@ export class InjectionDetectedError extends Error {
 export async function runIngestion(
   ctx: BeastContext,
   firewall: IFirewallModule,
+  logger: ILogger = new NullLogger(),
 ): Promise<void> {
   ctx.phase = 'ingestion';
   ctx.addAudit('firewall', 'pipeline:start', { input: ctx.userInput });
+  logger.info('Ingestion: input received', { inputLength: ctx.userInput.length });
+  logger.debug('Ingestion: input raw', { input: ctx.userInput });
 
   const result = await firewall.runPipeline(ctx.userInput);
+  logger.info('Ingestion: firewall result', {
+    blocked: result.blocked,
+    violations: result.violations,
+  });
 
   if (result.blocked) {
     ctx.addAudit('firewall', 'pipeline:blocked', { violations: result.violations });
+    logger.warn('Ingestion: blocked', { violations: result.violations, blocked: true });
     throw new InjectionDetectedError(result.violations);
   }
 
@@ -38,4 +47,5 @@ export async function runIngestion(
     sanitizedLength: result.sanitizedText.length,
     warningCount: result.violations.length,
   });
+  logger.info('Ingestion: sanitized', { sanitizedLength: result.sanitizedText.length });
 }

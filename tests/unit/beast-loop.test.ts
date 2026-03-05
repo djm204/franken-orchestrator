@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { BeastLoop } from '../../src/beast-loop.js';
-import { makeDeps } from '../helpers/stubs.js';
+import { makeDeps, makeLogger } from '../helpers/stubs.js';
 
 describe('BeastLoop', () => {
   it('runs through all 4 phases and returns completed result', async () => {
@@ -77,5 +77,31 @@ describe('BeastLoop', () => {
       totalTokens: 0,
       estimatedCostUsd: 0,
     });
+  });
+
+  it('logs session start, phase transitions, and final result', async () => {
+    const logger = makeLogger();
+    const loop = new BeastLoop(makeDeps({ logger }));
+
+    const result = await loop.run({
+      projectId: 'proj',
+      userInput: 'test',
+      sessionId: 'sess-1',
+    });
+
+    expect(logger.info).toHaveBeenCalledWith(
+      'BeastLoop: session start',
+      expect.objectContaining({ sessionId: 'sess-1', projectId: 'proj' }),
+    );
+    expect(logger.info).toHaveBeenCalledWith('BeastLoop: phase start', { phase: 'ingestion' });
+    expect(logger.info).toHaveBeenCalledWith('BeastLoop: phase end', { phase: 'closure' });
+    expect(logger.info).toHaveBeenCalledWith(
+      'BeastLoop: session end',
+      expect.objectContaining({ status: result.status }),
+    );
+    expect(logger.debug).toHaveBeenCalledWith(
+      'BeastLoop: config',
+      expect.objectContaining({ enableTracing: true }),
+    );
   });
 });
