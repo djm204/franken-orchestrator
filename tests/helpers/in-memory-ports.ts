@@ -9,6 +9,8 @@ import type {
   FirewallResult,
   ISkillsModule,
   SkillDescriptor,
+  SkillInput,
+  SkillResult,
   IMemoryModule,
   MemoryContext,
   EpisodicEntry,
@@ -80,13 +82,14 @@ export class InMemoryFirewall implements IFirewallModule {
 // ── Skills ──
 
 export class InMemorySkills implements ISkillsModule {
+  readonly executions: Array<{ skillId: string; input: SkillInput }> = [];
   private readonly skills: SkillDescriptor[];
 
   constructor(skills?: SkillDescriptor[]) {
     this.skills = skills ?? [
-      { id: 'code-gen', name: 'Code Generation', requiresHitl: false },
-      { id: 'file-write', name: 'File Write', requiresHitl: true },
-      { id: 'search', name: 'Search', requiresHitl: false },
+      { id: 'code-gen', name: 'Code Generation', requiresHitl: false, executionType: 'function' },
+      { id: 'file-write', name: 'File Write', requiresHitl: true, executionType: 'function' },
+      { id: 'search', name: 'Search', requiresHitl: false, executionType: 'function' },
     ];
   }
 
@@ -96,6 +99,18 @@ export class InMemorySkills implements ISkillsModule {
 
   getAvailableSkills(): readonly SkillDescriptor[] {
     return this.skills;
+  }
+
+  async execute(skillId: string, input: SkillInput): Promise<SkillResult> {
+    if (!this.hasSkill(skillId)) {
+      throw new Error(`Skill not found: ${skillId}`);
+    }
+
+    this.executions.push({ skillId, input });
+    return {
+      output: `Executed ${skillId}: ${input.objective}`,
+      tokensUsed: 0,
+    };
   }
 }
 

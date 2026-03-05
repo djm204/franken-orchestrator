@@ -9,6 +9,8 @@ import type {
   IGovernorModule,
   IHeartbeatModule,
   BeastLoopDeps,
+  SkillInput,
+  SkillResult,
 } from '../../src/deps.js';
 
 export function makeFirewall(overrides: Partial<IFirewallModule> = {}): IFirewallModule {
@@ -26,6 +28,10 @@ export function makeSkills(overrides: Partial<ISkillsModule> = {}): ISkillsModul
   return {
     hasSkill: vi.fn(() => true),
     getAvailableSkills: vi.fn(() => []),
+    execute: vi.fn(async (_skillId: string, _input: SkillInput): Promise<SkillResult> => ({
+      output: 'mock-output',
+      tokensUsed: 0,
+    })),
     ...overrides,
   };
 }
