@@ -8,6 +8,7 @@ import type {
   ICritiqueModule,
   IGovernorModule,
   IHeartbeatModule,
+  ILogger,
   BeastLoopDeps,
   SkillInput,
   SkillResult,
@@ -101,6 +102,15 @@ export function makeHeartbeat(overrides: Partial<IHeartbeatModule> = {}): IHeart
   };
 }
 
+export function makeLogger(): ILogger {
+  return {
+    info: vi.fn(),
+    debug: vi.fn(),
+    warn: vi.fn(),
+    error: vi.fn(),
+  };
+}
+
 export function makeDeps(overrides: Partial<BeastLoopDeps> = {}): BeastLoopDeps {
   return {
     firewall: makeFirewall(),
@@ -111,6 +121,7 @@ export function makeDeps(overrides: Partial<BeastLoopDeps> = {}): BeastLoopDeps 
     critique: makeCritique(),
     governor: makeGovernor(),
     heartbeat: makeHeartbeat(),
+    logger: makeLogger(),
     clock: () => new Date('2025-01-15T10:00:00Z'),
     ...overrides,
   };

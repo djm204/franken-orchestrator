@@ -6,6 +6,13 @@
  * never depends on concrete module implementations.
  */
 
+export interface ILogger {
+  info(msg: string, data?: unknown): void;
+  debug(msg: string, data?: unknown): void;
+  warn(msg: string, data?: unknown): void;
+  error(msg: string, data?: unknown): void;
+}
+
 /** What the orchestrator needs from MOD-01 (Firewall). */
 export interface IFirewallModule {
   runPipeline(input: string): Promise<FirewallResult>;
@@ -181,6 +188,7 @@ export interface BeastLoopDeps {
   readonly critique: ICritiqueModule;
   readonly governor: IGovernorModule;
   readonly heartbeat: IHeartbeatModule;
+  readonly logger: ILogger;
   readonly mcp?: IMcpModule;
   readonly clock: () => Date;
 }

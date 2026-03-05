@@ -26,6 +26,7 @@ import type {
   ApprovalPayload,
   ApprovalOutcome,
   IHeartbeatModule,
+  ILogger,
 } from '../../src/deps.js';
 
 // ── Firewall ──
@@ -278,5 +279,27 @@ export class InMemoryHeartbeat implements IHeartbeatModule {
       techDebt: [],
       summary: 'System healthy',
     };
+  }
+}
+
+// ── Logger ──
+
+export class InMemoryLogger implements ILogger {
+  readonly entries: Array<{ level: string; msg: string; data?: unknown }> = [];
+
+  info(msg: string, data?: unknown): void {
+    this.entries.push({ level: 'info', msg, data });
+  }
+
+  debug(msg: string, data?: unknown): void {
+    this.entries.push({ level: 'debug', msg, data });
+  }
+
+  warn(msg: string, data?: unknown): void {
+    this.entries.push({ level: 'warn', msg, data });
+  }
+
+  error(msg: string, data?: unknown): void {
+    this.entries.push({ level: 'error', msg, data });
   }
 }

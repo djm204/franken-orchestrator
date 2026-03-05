@@ -5,7 +5,8 @@
  */
 
 import { BeastLoop } from '../../src/beast-loop.js';
-import type { BeastLoopDeps } from '../../src/deps.js';
+import type { BeastLoopDeps, ILogger } from '../../src/deps.js';
+import { NullLogger } from '../../src/logger.js';
 import type { OrchestratorConfig } from '../../src/config/orchestrator-config.js';
 import {
   InMemoryFirewall,
@@ -33,6 +34,7 @@ export interface TestOrchestratorPorts {
   readonly critique: InMemoryCritique;
   readonly governor: InMemoryGovernor;
   readonly heartbeat: InMemoryHeartbeat;
+  readonly logger: ILogger;
 }
 
 export interface TestOrchestratorOverrides {
@@ -40,6 +42,7 @@ export interface TestOrchestratorOverrides {
   planner?: InMemoryPlannerOptions;
   critique?: InMemoryCritiqueOptions;
   governor?: InMemoryGovernorOptions;
+  logger?: ILogger;
   config?: Partial<OrchestratorConfig>;
 }
 
@@ -55,6 +58,7 @@ export interface TestOrchestrator {
 export function createTestOrchestrator(
   overrides: TestOrchestratorOverrides = {},
 ): TestOrchestrator {
+  const logger = overrides.logger ?? new NullLogger();
   const ports: TestOrchestratorPorts = {
     firewall: new InMemoryFirewall(overrides.firewall),
     skills: new InMemorySkills(),
@@ -64,6 +68,7 @@ export function createTestOrchestrator(
     critique: new InMemoryCritique(overrides.critique),
     governor: new InMemoryGovernor(overrides.governor),
     heartbeat: new InMemoryHeartbeat(),
+    logger,
   };
 
   const deps: BeastLoopDeps = {
@@ -75,6 +80,7 @@ export function createTestOrchestrator(
     critique: ports.critique,
     governor: ports.governor,
     heartbeat: ports.heartbeat,
+    logger: ports.logger,
     clock: () => new Date('2025-01-15T10:00:00Z'),
   };
 
