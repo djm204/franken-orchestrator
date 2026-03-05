@@ -197,6 +197,32 @@ describe('runExecution', () => {
     );
   });
 
+  it('builds skill input with objective, context, and dependency outputs', async () => {
+    const execute = vi.fn(async (skillId: string) => ({
+      output: `${skillId}-output`,
+      tokensUsed: 1,
+    }));
+    const skills = makeSkills({
+      hasSkill: vi.fn(() => true),
+      execute,
+    });
+    const c = ctx([
+      { id: 't1', objective: 'first', requiredSkills: ['alpha'], dependsOn: [] },
+      { id: 't2', objective: 'second', requiredSkills: ['beta'], dependsOn: ['t1'] },
+    ]);
+    c.sanitizedIntent = {
+      goal: 'ship it',
+      context: { adrs: ['ADR-1'], knownErrors: ['E1'], rules: ['R1'] },
+    };
+
+    await runExecution(c, skills, makeGovernor(), makeMemory(), makeObserver());
+
+    const secondInput = execute.mock.calls[1]![1];
+    expect(secondInput.objective).toBe('second');
+    expect(secondInput.context).toEqual({ adrs: ['ADR-1'], knownErrors: ['E1'], rules: ['R1'] });
+    expect(secondInput.dependencyOutputs.get('t1')).toBe('alpha-output');
+  });
+
   it('aggregates tokensUsed across multiple skills for audit', async () => {
     const skills = makeSkills({
       hasSkill: vi.fn(() => true),
