@@ -3,6 +3,17 @@
  * Types and interfaces only — no implementation code.
  */
 
+export interface IterationResult {
+  readonly iteration: number;
+  readonly exitCode: number;
+  readonly stdout: string;
+  readonly stderr: string;
+  readonly durationMs: number;
+  readonly rateLimited: boolean;
+  readonly promiseDetected: boolean;
+  readonly tokensEstimated: number;
+}
+
 export interface RalphLoopConfig {
   readonly prompt: string;
   readonly promiseTag: string;
@@ -12,6 +23,9 @@ export interface RalphLoopConfig {
   readonly claudeCmd: string;
   readonly codexCmd: string;
   readonly timeoutMs: number;
+  readonly workingDir?: string | undefined;
+  readonly onRateLimit?: ((provider: string) => string | undefined) | undefined;
+  readonly onIteration?: ((iteration: number, result: IterationResult) => void) | undefined;
 }
 
 export interface RalphLoopResult {
