@@ -155,6 +155,30 @@ describe('runExecution', () => {
     expect(outcomes[1]!.output).toBe('alpha-output');
   });
 
+  it('calls skills.execute for each required skill', async () => {
+    const execute = vi.fn(async (skillId: string) => ({
+      output: `${skillId}-out`,
+      tokensUsed: 1,
+    }));
+    const skills = makeSkills({
+      hasSkill: vi.fn(() => true),
+      execute,
+    });
+    const c = ctx([
+      {
+        id: 't1',
+        objective: 'run three skills',
+        requiredSkills: ['alpha', 'beta', 'gamma'],
+        dependsOn: [],
+      },
+    ]);
+
+    await runExecution(c, skills, makeGovernor(), makeMemory(), makeObserver());
+
+    expect(execute).toHaveBeenCalledTimes(3);
+    expect(execute.mock.calls.map(call => call[0])).toEqual(['alpha', 'beta', 'gamma']);
+  });
+
   it('fails when a required skill is missing and records failure trace', async () => {
     const memory = makeMemory();
     const skills = makeSkills({
