@@ -155,6 +155,24 @@ describe('runExecution', () => {
     expect(outcomes[1]!.output).toBe('alpha-output');
   });
 
+  it('skips skills.execute for passthrough tasks with no required skills', async () => {
+    const execute = vi.fn(async () => ({ output: 'unused', tokensUsed: 1 }));
+    const skills = makeSkills({
+      execute,
+    });
+    const c = ctx([
+      { id: 't1', objective: 'noop', requiredSkills: [], dependsOn: [] },
+    ]);
+
+    const outcomes = await runExecution(c, skills, makeGovernor(), makeMemory(), makeObserver());
+
+    expect(execute).not.toHaveBeenCalled();
+    expect(outcomes[0]!.status).toBe('success');
+    const output = outcomes[0]!.output as Map<string, unknown>;
+    expect(output).toBeInstanceOf(Map);
+    expect(output.size).toBe(0);
+  });
+
   it('calls skills.execute for each required skill', async () => {
     const execute = vi.fn(async (skillId: string) => ({
       output: `${skillId}-out`,
