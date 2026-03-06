@@ -21,7 +21,7 @@ export function parseResetTime(stderr: string, stdout: string): { sleepSeconds: 
   // "Please retry after 25s"
   const retryAfterPatternMatch = combined.match(/retry[- ]after\s+(\d+)\s*s?/i);
   if (retryAfterPatternMatch?.[1]) {
-    return { sleepSeconds: parseInt(retryAfterPatternMatch[1], 10), source: 'retry-after pattern' };
+    return { sleepSeconds: parseInt(retryAfterPatternMatch[1], 10), source: 'retry-after header' };
   }
 
   // "try again in 5 minutes" / "try again in 30 seconds"
@@ -309,7 +309,7 @@ export class RalphLoop {
 
         for (const [, data] of exhaustedProviders) {
           const parsed = parseResetTime(data.stderr, data.stdout);
-          if (parsed.sleepSeconds > 0 && parsed.sleepSeconds < shortestSleep) {
+          if (parsed.sleepSeconds >= 0 && parsed.sleepSeconds < shortestSleep) {
             shortestSleep = parsed.sleepSeconds;
             shortestSource = parsed.source;
           }

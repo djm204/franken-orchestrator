@@ -276,6 +276,27 @@ describe('RalphLoop — Rate Limit Resilience', () => {
     expect(sleepFn).toHaveBeenCalledWith(30_000);
   });
 
+  it('uses exact parsed sleep when shortest reset is 0 seconds', async () => {
+    const sleepFn = vi.fn().mockResolvedValue(undefined);
+    const onSleep = vi.fn();
+
+    queueMock({ stderr: 'retry-after: 0', exitCode: 1 });
+    queueMock({ stderr: 'retry-after: 5', exitCode: 1 });
+    queueMock({ stdout: 'ok\n<promise>IMPL_X_DONE</promise>', exitCode: 0 });
+
+    const loop = new RalphLoop();
+    const result = await loop.run(baseConfig({
+      maxIterations: 1,
+      providers: ['claude', 'codex'],
+      onSleep,
+      _sleepFn: sleepFn,
+    }));
+
+    expect(result.completed).toBe(true);
+    expect(sleepFn).toHaveBeenCalledWith(0);
+    expect(onSleep).toHaveBeenCalledWith(0, 'retry-after header');
+  });
+
   // ── Exhausted state cleared after sleep ──
 
   it('clears exhausted providers after sleep and resumes with original provider', async () => {
