@@ -83,6 +83,7 @@ export class BeastLoop {
         this.config,
         outcomes,
         logger,
+        this.deps.prCreator,
       );
       logger.info('BeastLoop: phase end', { phase: 'closure' });
       logger.info('BeastLoop: session end', {

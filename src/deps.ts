@@ -1,4 +1,5 @@
 import type { CliSkillExecutor } from './skills/cli-skill-executor.js';
+import type { PrCreator } from './closure/pr-creator.js';
 
 /**
  * BeastLoopDeps — dependency injection interface for the orchestrator.
@@ -201,6 +202,7 @@ export interface BeastLoopDeps {
   readonly governor: IGovernorModule;
   readonly heartbeat: IHeartbeatModule;
   readonly logger: ILogger;
+  readonly prCreator?: PrCreator;
   readonly mcp?: IMcpModule;
   readonly cliExecutor?: CliSkillExecutor;
   readonly clock: () => Date;

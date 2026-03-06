@@ -2,6 +2,7 @@ import type { BeastContext } from '../context/franken-context.js';
 import type { IObserverModule, IHeartbeatModule, ILogger } from '../deps.js';
 import type { BeastResult, TaskOutcome } from '../types.js';
 import type { OrchestratorConfig } from '../config/orchestrator-config.js';
+import type { PrCreator } from '../closure/pr-creator.js';
 import { NullLogger } from '../logger.js';
 
 /**
@@ -16,6 +17,7 @@ export async function runClosure(
   config: OrchestratorConfig,
   taskOutcomes: readonly TaskOutcome[],
   logger: ILogger = new NullLogger(),
+  prCreator?: PrCreator,
 ): Promise<BeastResult> {
   ctx.phase = 'closure';
   ctx.addAudit('orchestrator', 'phase:start', { phase: 'closure' });
@@ -59,7 +61,7 @@ export async function runClosure(
 
   const allSucceeded = taskOutcomes.every(o => o.status === 'success');
 
-  return {
+  const result: BeastResult = {
     sessionId: ctx.sessionId,
     projectId: ctx.projectId,
     phase: 'closure',
@@ -71,4 +73,16 @@ export async function runClosure(
       : undefined,
     durationMs: ctx.elapsedMs(),
   };
+
+  if (prCreator) {
+    try {
+      await prCreator.create(result, logger);
+    } catch (error) {
+      logger.error('Closure: PR creation failed', {
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
+  return result;
 }

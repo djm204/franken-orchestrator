@@ -53,6 +53,7 @@ export { runHydration } from './phases/hydration.js';
 export { runPlanning, CritiqueSpiralError } from './phases/planning.js';
 export { runExecution, HitlRejectedError } from './phases/execution.js';
 export { runClosure } from './phases/closure.js';
+export { PrCreator } from './closure/pr-creator.js';
 
 // Circuit breakers
 export { checkInjection } from './breakers/injection-breaker.js';
