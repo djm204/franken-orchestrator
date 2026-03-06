@@ -70,6 +70,9 @@ export { LlmPlanner } from './skills/llm-planner.js';
 
 // Planning
 export { ChunkFileGraphBuilder } from './planning/chunk-file-graph-builder.js';
+export { LlmGraphBuilder } from './planning/llm-graph-builder.js';
+export { InterviewLoop } from './planning/interview-loop.js';
+export type { InterviewIO } from './planning/interview-loop.js';
 export type { GraphBuilder } from './planning/chunk-file-graph-builder.js';
 
 // CLI skill execution
