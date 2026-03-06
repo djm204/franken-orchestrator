@@ -2,7 +2,7 @@ import { spawn } from 'node:child_process';
 import type { RalphLoopConfig, RalphLoopResult, IterationResult } from './cli-types.js';
 
 const RATE_LIMIT_PATTERNS =
-  /rate.?limit|429|too many requests|retry.?after|overloaded|capacity|temporarily unavailable|out of extra usage|usage limit|resets?\s+\d/i;
+  /rate.?limit|429|too many requests|retry.?after|overloaded|capacity|temporarily unavailable|out of extra usage|usage limit|resets?\s+\d|resets?\s+in\s+\d+\s*s/i;
 
 function isRateLimited(stderr: string, stdout: string, exitCode: number): boolean {
   if (exitCode !== 0 && RATE_LIMIT_PATTERNS.test(stderr)) return true;
@@ -13,13 +13,13 @@ export function parseResetTime(stderr: string, stdout: string): { sleepSeconds: 
   const combined = `${stderr}\n${stdout}`;
 
   // Anthropic "retry-after: 30" header
-  const retryAfterHeaderMatch = combined.match(/retry[- ]after:\s*(\d+)/i);
+  const retryAfterHeaderMatch = combined.match(/retry.?after:?\s*(\d+)\s*s?/i);
   if (retryAfterHeaderMatch?.[1]) {
     return { sleepSeconds: parseInt(retryAfterHeaderMatch[1], 10), source: 'retry-after header' };
   }
 
   // "Please retry after 25s"
-  const retryAfterPatternMatch = combined.match(/retry[- ]after\s+(\d+)\s*s?/i);
+  const retryAfterPatternMatch = combined.match(/retry.?after\s+(\d+)\s*s?/i);
   if (retryAfterPatternMatch?.[1]) {
     return { sleepSeconds: parseInt(retryAfterPatternMatch[1], 10), source: 'retry-after header' };
   }
@@ -246,11 +246,14 @@ export class RalphLoop {
     while (iteration < config.maxIterations) {
       iteration++;
       const startTime = Date.now();
+      config.onProviderAttempt?.(activeProvider, iteration);
 
       let result: { stdout: string; stderr: string; exitCode: number };
       try {
         result = await spawnIteration(config, activeProvider);
-      } catch {
+      } catch (error) {
+        const msg = error instanceof Error ? error.message : String(error);
+        config.onSpawnError?.(activeProvider, msg);
         continue;
       }
 
@@ -299,6 +302,7 @@ export class RalphLoop {
 
         if (nextProvider) {
           // Switch to next provider, retry immediately
+          config.onProviderSwitch?.(activeProvider, nextProvider, 'rate-limit');
           activeProvider = nextProvider;
           continue;
         }
@@ -343,6 +347,9 @@ export class RalphLoop {
 
         // Clear exhausted state, reset to original provider
         exhaustedProviders.clear();
+        if (activeProvider !== initialProvider) {
+          config.onProviderSwitch?.(activeProvider, initialProvider, 'post-sleep-reset');
+        }
         activeProvider = initialProvider;
         continue;
       }

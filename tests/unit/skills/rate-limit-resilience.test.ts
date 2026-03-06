@@ -75,6 +75,16 @@ describe('parseResetTime', () => {
     expect(result).toEqual({ sleepSeconds: 60, source: 'retry-after header' });
   });
 
+  it('parses retry_after with underscore variation', () => {
+    const result = parseResetTime('retry_after: 42', '');
+    expect(result).toEqual({ sleepSeconds: 42, source: 'retry-after header' });
+  });
+
+  it('parses retryafter without separator', () => {
+    const result = parseResetTime('retryafter: 18', '');
+    expect(result).toEqual({ sleepSeconds: 18, source: 'retry-after header' });
+  });
+
   it('parses "try again in N minutes"', () => {
     const result = parseResetTime('Please try again in 5 minutes', '');
     expect(result).toEqual({ sleepSeconds: 300, source: 'minutes pattern' });
@@ -180,6 +190,21 @@ describe('RalphLoop — Rate Limit Resilience', () => {
     expect(result.iterations).toBe(1);
     // First call uses claude, second uses codex
     expect((mockSpawn.mock.calls[0] as unknown[])[0]).toBe('claude');
+    expect((mockSpawn.mock.calls[1] as unknown[])[0]).toBe('codex');
+  });
+
+  it('treats "resets in Ns" errors as rate limits for provider fallback', async () => {
+    queueMock({ stderr: 'request quota exceeded; resets in 9s', exitCode: 1 });
+    queueMock({ stdout: 'Codex recovered\n<promise>IMPL_X_DONE</promise>', exitCode: 0 });
+
+    const loop = new RalphLoop();
+    const result = await loop.run(baseConfig({
+      maxIterations: 1,
+      providers: ['claude', 'codex'],
+    }));
+
+    expect(result.completed).toBe(true);
+    expect(result.iterations).toBe(1);
     expect((mockSpawn.mock.calls[1] as unknown[])[0]).toBe('codex');
   });
 
