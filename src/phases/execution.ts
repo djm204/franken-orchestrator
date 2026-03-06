@@ -9,6 +9,7 @@ import type {
   IMcpModule,
   MemoryContext,
   ILogger,
+  ICheckpointStore,
 } from '../deps.js';
 import type { TaskOutcome } from '../types.js';
 import type { CliSkillExecutor } from '../skills/cli-skill-executor.js';
@@ -38,6 +39,7 @@ export async function runExecution(
   mcp?: IMcpModule,
   logger: ILogger = new NullLogger(),
   cliExecutor?: CliSkillExecutor,
+  checkpoint?: ICheckpointStore,
 ): Promise<readonly TaskOutcome[]> {
   ctx.phase = 'execution';
   ctx.addAudit('orchestrator', 'phase:start', { phase: 'execution' });
@@ -75,6 +77,15 @@ export async function runExecution(
     }
 
     const task = pending.splice(readyIndex, 1)[0]!;
+
+    // Skip tasks already completed in a previous run (checkpoint recovery)
+    if (checkpoint?.has(`${task.id}:done`)) {
+      logger.info('Execution: Skipping checkpointed task', { taskId: task.id });
+      outcomes.push({ taskId: task.id, status: 'skipped' });
+      completed.add(task.id);
+      continue;
+    }
+
     const outcome = await executeTask(
       task,
       skills,
@@ -86,12 +97,14 @@ export async function runExecution(
       mcp,
       logger,
       cliExecutor,
+      checkpoint,
     );
     outcomes.push(outcome);
 
     if (outcome.status === 'success') {
       completed.add(task.id);
       completedOutputs.set(task.id, outcome.output);
+      checkpoint?.write(`${task.id}:done`);
     }
   }
 
@@ -122,6 +135,7 @@ async function executeTask(
   _mcp?: IMcpModule,
   logger: ILogger = new NullLogger(),
   cliExecutor?: CliSkillExecutor,
+  checkpoint?: ICheckpointStore,
 ): Promise<TaskOutcome> {
   const startTime = Date.now();
   const span = observer.startSpan(`task:${task.id}`);
@@ -131,6 +145,11 @@ async function executeTask(
     dependsOn: task.dependsOn,
   });
   logger.debug('Execution: task detail', { task });
+
+  // Dirty file resume: recover partial work from a crashed run
+  if (checkpoint && cliExecutor && checkpoint.lastCommit(task.id, 'impl')) {
+    await cliExecutor.recoverDirtyFiles(task.id, 'impl', checkpoint, logger);
+  }
 
   try {
     // Check HITL requirement
@@ -235,7 +254,7 @@ async function executeTask(
         if (!cliExecutor) {
           throw new Error(`CLI skill '${skillId}' requires a CliSkillExecutor but none was provided`);
         }
-        result = await cliExecutor.execute(skillId, baseInput, {} as never);
+        result = await cliExecutor.execute(skillId, baseInput, {} as never, checkpoint, task.id);
       } else {
         result = await skills.execute(skillId, baseInput);
       }

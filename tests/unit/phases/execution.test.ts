@@ -344,7 +344,7 @@ describe('runExecution', () => {
     const outcomes = await runExecution(c, skills, makeGovernor(), makeMemory(), makeObserver(), undefined, undefined, cliExec);
 
     expect(cliExec.execute).toHaveBeenCalledTimes(1);
-    expect(cliExec.execute).toHaveBeenCalledWith('build', expect.objectContaining({ objective: 'build it' }), expect.anything());
+    expect(cliExec.execute).toHaveBeenCalledWith('build', expect.objectContaining({ objective: 'build it' }), expect.anything(), undefined, 't1');
     expect(skills.execute).not.toHaveBeenCalled();
     expect(outcomes[0]!.status).toBe('success');
     expect(outcomes[0]!.output).toBe('cli-output');

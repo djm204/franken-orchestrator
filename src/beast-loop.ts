@@ -70,6 +70,7 @@ export class BeastLoop {
         this.deps.mcp,
         logger,
         this.deps.cliExecutor,
+        this.deps.checkpoint,
       );
       logger.info('BeastLoop: phase end', { phase: 'execution' });
 

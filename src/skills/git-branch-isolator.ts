@@ -84,4 +84,16 @@ export class GitBranchIsolator {
   getCurrentHead(): string {
     return this.git('rev-parse HEAD');
   }
+
+  getStatus(): string {
+    return this.git('status --porcelain');
+  }
+
+  resetHard(commitHash: string): void {
+    this.git(`reset --hard ${commitHash}`);
+  }
+
+  getWorkingDir(): string {
+    return this.config.workingDir;
+  }
 }

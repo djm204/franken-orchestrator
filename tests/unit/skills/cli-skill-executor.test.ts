@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { RalphLoopConfig, IterationResult, CliSkillConfig, GitIsolationConfig } from '../../../src/skills/cli-types.js';
-import type { SkillInput } from '../../../src/deps.js';
+import type { SkillInput, ICheckpointStore } from '../../../src/deps.js';
 
 // ── Factories ──
 
@@ -111,6 +111,19 @@ function makeMockObserver() {
   };
 }
 
+function makeCheckpoint(overrides: Partial<ICheckpointStore> = {}): ICheckpointStore {
+  const store = new Set<string>();
+  return {
+    has: vi.fn((key: string) => store.has(key)),
+    write: vi.fn((key: string) => { store.add(key); }),
+    readAll: vi.fn(() => new Set(store)),
+    clear: vi.fn(() => { store.clear(); }),
+    recordCommit: vi.fn(),
+    lastCommit: vi.fn(() => undefined),
+    ...overrides,
+  };
+}
+
 // ── Tests ──
 
 describe('CliSkillExecutor', () => {
@@ -128,10 +141,12 @@ describe('CliSkillExecutor', () => {
     skillId = 'cli:01_types',
     input = makeSkillInput(),
     config = makeCliConfig(),
+    checkpoint?: ICheckpointStore,
+    taskId?: string,
   ) {
     const { CliSkillExecutor } = await import('../../../src/skills/cli-skill-executor.js');
     const executor = new CliSkillExecutor(ralph as any, git as any, observer);
-    return executor.execute(skillId, input, config);
+    return executor.execute(skillId, input, config, checkpoint, taskId);
   }
 
   describe('successful execution (promise detected)', () => {
@@ -323,6 +338,72 @@ describe('CliSkillExecutor', () => {
       expect(ralph.run).not.toHaveBeenCalled();
       expect(result.output).toContain('Budget exceeded');
       expect(result.tokensUsed).toBe(0);
+    });
+  });
+
+  describe('per-commit checkpoint recording', () => {
+    it('calls checkpoint.recordCommit after auto-commit in onIteration', async () => {
+      const checkpoint = makeCheckpoint();
+      git.autoCommit.mockReturnValue(true);
+      git.getCurrentHead.mockReturnValue('abc123');
+
+      ralph.run.mockImplementation(async (config: RalphLoopConfig) => {
+        config.onIteration?.(1, makeIterResult({ iteration: 1 }));
+        return { completed: true, iterations: 1, output: 'done', tokensUsed: 100 };
+      });
+
+      await createAndExecute('cli:01_types', makeSkillInput(), makeCliConfig(), checkpoint, 'task-1');
+
+      expect(git.autoCommit).toHaveBeenCalledWith('01_types', 'impl', 1);
+      expect(checkpoint.recordCommit).toHaveBeenCalledWith('task-1', 'impl', 1, 'abc123');
+    });
+
+    it('does not call recordCommit when auto-commit returns false (nothing to commit)', async () => {
+      const checkpoint = makeCheckpoint();
+      git.autoCommit.mockReturnValue(false);
+
+      ralph.run.mockImplementation(async (config: RalphLoopConfig) => {
+        config.onIteration?.(1, makeIterResult({ iteration: 1 }));
+        return { completed: true, iterations: 1, output: 'done', tokensUsed: 100 };
+      });
+
+      await createAndExecute('cli:01_types', makeSkillInput(), makeCliConfig(), checkpoint, 'task-1');
+
+      expect(git.autoCommit).toHaveBeenCalled();
+      expect(checkpoint.recordCommit).not.toHaveBeenCalled();
+    });
+
+    it('works without checkpoint (backward compatible)', async () => {
+      ralph.run.mockImplementation(async (config: RalphLoopConfig) => {
+        config.onIteration?.(1, makeIterResult({ iteration: 1 }));
+        return { completed: true, iterations: 1, output: 'done', tokensUsed: 100 };
+      });
+
+      // No checkpoint passed — should not throw
+      const result = await createAndExecute();
+
+      expect(result.output).toBe('done');
+    });
+
+    it('records multiple commits across iterations', async () => {
+      const checkpoint = makeCheckpoint();
+      let commitCount = 0;
+      git.autoCommit.mockReturnValue(true);
+      git.getCurrentHead.mockImplementation(() => `hash_${++commitCount}`);
+
+      ralph.run.mockImplementation(async (config: RalphLoopConfig) => {
+        config.onIteration?.(1, makeIterResult({ iteration: 1 }));
+        config.onIteration?.(2, makeIterResult({ iteration: 2 }));
+        config.onIteration?.(3, makeIterResult({ iteration: 3 }));
+        return { completed: true, iterations: 3, output: 'done', tokensUsed: 300 };
+      });
+
+      await createAndExecute('cli:01_types', makeSkillInput(), makeCliConfig(), checkpoint, 'task-1');
+
+      expect(checkpoint.recordCommit).toHaveBeenCalledTimes(3);
+      expect(checkpoint.recordCommit).toHaveBeenCalledWith('task-1', 'impl', 1, 'hash_1');
+      expect(checkpoint.recordCommit).toHaveBeenCalledWith('task-1', 'impl', 2, 'hash_2');
+      expect(checkpoint.recordCommit).toHaveBeenCalledWith('task-1', 'impl', 3, 'hash_3');
     });
   });
 });

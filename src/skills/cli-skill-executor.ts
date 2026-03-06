@@ -1,5 +1,6 @@
+import { execSync } from 'node:child_process';
 import type { RalphLoopConfig, RalphLoopResult, IterationResult, CliSkillConfig } from './cli-types.js';
-import type { SkillInput, SkillResult } from '../deps.js';
+import type { SkillInput, SkillResult, ICheckpointStore, ILogger } from '../deps.js';
 import type { RalphLoop } from './ralph-loop.js';
 import type { GitBranchIsolator } from './git-branch-isolator.js';
 
@@ -87,14 +88,51 @@ export class CliSkillExecutor {
   private readonly ralph: RalphLoop;
   private readonly git: GitBranchIsolator;
   private readonly observer: ObserverDeps;
+  private readonly verifyCommand?: string | undefined;
 
-  constructor(ralph: RalphLoop, git: GitBranchIsolator, observer: ObserverDeps) {
+  constructor(ralph: RalphLoop, git: GitBranchIsolator, observer: ObserverDeps, verifyCommand?: string) {
     this.ralph = ralph;
     this.git = git;
     this.observer = observer;
+    this.verifyCommand = verifyCommand;
   }
 
-  async execute(skillId: string, _input: SkillInput, config: CliSkillConfig): Promise<SkillResult> {
+  async recoverDirtyFiles(
+    taskId: string,
+    stage: string,
+    checkpoint: ICheckpointStore,
+    logger?: ILogger,
+  ): Promise<'clean' | 'committed' | 'reset'> {
+    const status = this.git.getStatus();
+    if (status.length === 0) return 'clean';
+
+    if (this.verifyCommand) {
+      try {
+        execSync(this.verifyCommand, {
+          encoding: 'utf-8',
+          cwd: this.git.getWorkingDir(),
+          stdio: 'pipe',
+        });
+      } catch {
+        // Verification failed — reset to last known good commit
+        const lastHash = checkpoint.lastCommit(taskId, stage);
+        if (lastHash) {
+          this.git.resetHard(lastHash);
+          logger?.warn('Recovery: reset to last good commit', { taskId, commitHash: lastHash });
+        }
+        return 'reset';
+      }
+    }
+
+    // Verification passed (or no verify command) — auto-commit dirty files
+    this.git.autoCommit(taskId, 'recovery', 0);
+    const commitHash = this.git.getCurrentHead();
+    checkpoint.recordCommit(taskId, stage, -1, commitHash);
+    logger?.info('Recovery: auto-committed dirty files', { taskId });
+    return 'committed';
+  }
+
+  async execute(skillId: string, _input: SkillInput, config: CliSkillConfig, checkpoint?: ICheckpointStore, taskId?: string): Promise<SkillResult> {
     if (!skillId || skillId.trim().length === 0) {
       throw new Error('skillId must not be empty');
     }
@@ -148,6 +186,13 @@ export class CliSkillExecutor {
 
         // End iteration span
         this.observer.endSpan(iterSpan, { status: 'completed' }, this.observer.loopDetector);
+
+        // Auto-commit + per-commit checkpoint recording
+        const committed = this.git.autoCommit(chunkId, 'impl', iteration);
+        if (committed && checkpoint && taskId) {
+          const commitHash = this.git.getCurrentHead();
+          checkpoint.recordCommit(taskId, 'impl', iteration, commitHash);
+        }
 
         // Budget check — stops before NEXT iteration
         const currentCost = this.computeCurrentCost();

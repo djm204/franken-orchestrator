@@ -150,6 +150,8 @@ describe('BeastLoop', () => {
       'cli:chunk-01',
       expect.objectContaining({ objective: 'run cli' }),
       expect.anything(),
+      undefined,
+      'task-cli',
     );
   });
 });
