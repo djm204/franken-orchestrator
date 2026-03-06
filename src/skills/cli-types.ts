@@ -12,6 +12,7 @@ export interface IterationResult {
   readonly rateLimited: boolean;
   readonly promiseDetected: boolean;
   readonly tokensEstimated: number;
+  readonly sleepMs: number;
 }
 
 export interface RalphLoopConfig {
@@ -24,8 +25,13 @@ export interface RalphLoopConfig {
   readonly codexCmd: string;
   readonly timeoutMs: number;
   readonly workingDir?: string | undefined;
+  readonly abortSignal?: AbortSignal | undefined;
+  readonly providers?: readonly ('claude' | 'codex')[] | undefined;
   readonly onRateLimit?: ((provider: string) => string | undefined) | undefined;
   readonly onIteration?: ((iteration: number, result: IterationResult) => void) | undefined;
+  readonly onSleep?: ((durationMs: number, source: string) => void) | undefined;
+  /** @internal Injected sleep function for testing — do not use in production. */
+  readonly _sleepFn?: ((ms: number) => Promise<void>) | undefined;
 }
 
 export interface RalphLoopResult {
