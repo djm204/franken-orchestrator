@@ -221,6 +221,23 @@ describe('RalphLoop — Rate Limit Resilience', () => {
     expect((mockSpawn.mock.calls[1] as unknown[])[0]).toBe('codex');
   });
 
+  it('defaults providers to [claude, codex] when an empty providers list is passed', async () => {
+    queueMock({ stderr: 'rate limit exceeded', exitCode: 1 });
+    queueMock({ stdout: 'Done!\n<promise>IMPL_X_DONE</promise>', exitCode: 0 });
+
+    const sleepFn = vi.fn().mockResolvedValue(undefined);
+    const loop = new RalphLoop();
+    const result = await loop.run(baseConfig({
+      maxIterations: 1,
+      providers: [],
+      _sleepFn: sleepFn,
+    }));
+
+    expect(result.completed).toBe(true);
+    expect((mockSpawn.mock.calls[1] as unknown[])[0]).toBe('codex');
+    expect(sleepFn).not.toHaveBeenCalled();
+  });
+
   // ── Sleep when all providers exhausted ──
 
   it('sleeps when all providers are exhausted then resumes', async () => {
@@ -518,6 +535,28 @@ describe('RalphLoop — Rate Limit Resilience', () => {
     abortController.abort();
 
     await expect(runPromise).rejects.toThrow(/abort/i);
+    vi.useRealTimers();
+  });
+
+  it('clears pending default sleep timer when abort signal is triggered', async () => {
+    vi.useFakeTimers();
+    const abortController = new AbortController();
+
+    queueMock({ stderr: 'retry-after: 120', exitCode: 1 });
+    queueMock({ stderr: 'retry-after: 120', exitCode: 1 });
+
+    const loop = new RalphLoop();
+    const runPromise = loop.run(baseConfig({
+      maxIterations: 1,
+      providers: ['claude', 'codex'],
+      abortSignal: abortController.signal,
+    }));
+
+    await vi.advanceTimersByTimeAsync(0);
+    abortController.abort();
+
+    await expect(runPromise).rejects.toThrow(/abort/i);
+    expect(vi.getTimerCount()).toBe(0);
     vi.useRealTimers();
   });
 });

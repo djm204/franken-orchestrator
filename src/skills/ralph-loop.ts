@@ -73,6 +73,23 @@ function sleepWithAbort(
   if (!signal) return sleepFn(ms);
   if (signal.aborted) return Promise.reject(abortError());
 
+  if (sleepFn === defaultSleep) {
+    return new Promise((resolve, reject) => {
+      const onAbort = (): void => {
+        clearTimeout(timer);
+        signal.removeEventListener('abort', onAbort);
+        reject(abortError());
+      };
+
+      const timer = setTimeout(() => {
+        signal.removeEventListener('abort', onAbort);
+        resolve();
+      }, ms);
+
+      signal.addEventListener('abort', onAbort, { once: true });
+    });
+  }
+
   return new Promise((resolve, reject) => {
     const onAbort = (): void => {
       signal.removeEventListener('abort', onAbort);
@@ -229,7 +246,12 @@ function spawnIteration(
 
 export class RalphLoop {
   async run(config: RalphLoopConfig): Promise<RalphLoopResult> {
-    const providers: readonly ('claude' | 'codex')[] = config.providers ?? ['claude', 'codex'];
+    const configuredProviders = config.providers?.filter((provider): provider is 'claude' | 'codex' =>
+      provider === 'claude' || provider === 'codex');
+    const providers: readonly ('claude' | 'codex')[] =
+      configuredProviders && configuredProviders.length > 0
+        ? configuredProviders
+        : ['claude', 'codex'];
     const sleepFn = config._sleepFn ?? defaultSleep;
     const initialProvider = config.provider;
 
