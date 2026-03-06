@@ -36,7 +36,13 @@ export class LlmGraphBuilder implements GraphBuilder {
     const chunks = this.parseResponse(raw);
     this.validate(chunks);
 
-    const truncated = chunks.slice(0, this.maxChunks);
+    let truncated = chunks;
+    if (chunks.length > this.maxChunks) {
+      console.warn(
+        `LLM produced ${chunks.length} chunks, exceeding max of ${this.maxChunks}. Truncating to first ${this.maxChunks}.`,
+      );
+      truncated = chunks.slice(0, this.maxChunks);
+    }
     return this.buildGraph(truncated);
   }
 

@@ -268,6 +268,25 @@ describe('LlmGraphBuilder', () => {
       expect(graph.tasks).toHaveLength(24);
     });
 
+    it('emits a warning when truncating', async () => {
+      const manyChunks = Array.from({ length: 15 }, (_, i) => ({
+        id: `chunk_${String(i + 1).padStart(2, '0')}`,
+        objective: `Task ${i + 1}`,
+        files: [],
+        successCriteria: '',
+        verificationCommand: '',
+        dependencies: [],
+      }));
+
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      const llm = mockLlm(validChunksJson(manyChunks));
+      const builder = new LlmGraphBuilder(llm);
+      await builder.build(intent);
+
+      expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('Truncating'));
+      warnSpy.mockRestore();
+    });
+
     it('respects custom maxChunks option', async () => {
       const manyChunks = Array.from({ length: 10 }, (_, i) => ({
         id: `chunk_${String(i + 1).padStart(2, '0')}`,
