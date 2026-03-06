@@ -56,7 +56,14 @@ export class BeastLoop {
 
       // Phase 2: Planning + Critique
       logger.info('BeastLoop: phase start', { phase: 'planning' });
-      await runPlanning(ctx, this.deps.planner, this.deps.critique, this.config, logger);
+      await runPlanning(
+        ctx,
+        this.deps.planner,
+        this.deps.critique,
+        this.config,
+        logger,
+        this.deps.graphBuilder,
+      );
       logger.info('BeastLoop: phase end', { phase: 'planning' });
 
       // Phase 3: Execution

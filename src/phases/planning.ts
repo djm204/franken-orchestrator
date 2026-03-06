@@ -1,5 +1,6 @@
 import type { BeastContext } from '../context/franken-context.js';
 import type { IPlannerModule, ICritiqueModule, ILogger } from '../deps.js';
+import type { GraphBuilder } from '../planning/chunk-file-graph-builder.js';
 import type { OrchestratorConfig } from '../config/orchestrator-config.js';
 import { NullLogger } from '../logger.js';
 
@@ -24,6 +25,7 @@ export async function runPlanning(
   critique: ICritiqueModule,
   config: OrchestratorConfig,
   logger: ILogger = new NullLogger(),
+  graphBuilder?: GraphBuilder,
 ): Promise<void> {
   ctx.phase = 'planning';
   ctx.addAudit('orchestrator', 'phase:start', { phase: 'planning' });
@@ -32,6 +34,24 @@ export async function runPlanning(
 
   if (!ctx.sanitizedIntent) {
     throw new Error('Cannot plan without sanitizedIntent — ingestion phase incomplete');
+  }
+
+  if (graphBuilder) {
+    const plan = await graphBuilder.build({
+      goal: ctx.sanitizedIntent.goal,
+      strategy: ctx.sanitizedIntent.strategy,
+      context: ctx.sanitizedIntent.context,
+    });
+
+    ctx.plan = plan;
+    ctx.addAudit('planner', 'plan:created', {
+      iteration: 1,
+      taskCount: plan.tasks.length,
+      source: 'graphBuilder',
+    });
+    logger.info('Planning: plan created', { iteration: 1, taskCount: plan.tasks.length });
+    logger.debug('Planning: plan raw', { plan });
+    return;
   }
 
   let lastScore = 0;
