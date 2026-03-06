@@ -31,11 +31,12 @@ export class GitBranchIsolator {
     assertSafeId(chunkId);
     const branch = this.branchName(chunkId);
     this.git(`checkout ${this.config.baseBranch}`);
-    try {
-      this.git(`checkout -b ${branch}`);
-    } catch {
+    const exists = this.git(`branch --list ${branch}`);
+    if (exists.length > 0) {
       this.git(`checkout ${branch}`);
+      return;
     }
+    this.git(`checkout -b ${branch}`);
   }
 
   autoCommit(chunkId: string, stage: string, iteration: number): boolean {

@@ -162,14 +162,17 @@ describe('parseResetTime', () => {
 
 describe('RalphLoop — Rate Limit Resilience', () => {
   let RalphLoop: typeof import('../../../src/skills/ralph-loop.js').RalphLoop;
+  let stdoutWriteSpy: ReturnType<typeof vi.spyOn>;
 
   beforeEach(async () => {
     vi.resetAllMocks();
+    stdoutWriteSpy = vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
     const mod = await import('../../../src/skills/ralph-loop.js');
     RalphLoop = mod.RalphLoop;
   });
 
   afterEach(() => {
+    stdoutWriteSpy.mockRestore();
     vi.restoreAllMocks();
   });
 
@@ -195,6 +198,22 @@ describe('RalphLoop — Rate Limit Resilience', () => {
 
   it('treats "resets in Ns" errors as rate limits for provider fallback', async () => {
     queueMock({ stderr: 'request quota exceeded; resets in 9s', exitCode: 1 });
+    queueMock({ stdout: 'Codex recovered\n<promise>IMPL_X_DONE</promise>', exitCode: 0 });
+
+    const loop = new RalphLoop();
+    const result = await loop.run(baseConfig({
+      maxIterations: 1,
+      providers: ['claude', 'codex'],
+    }));
+
+    expect(result.completed).toBe(true);
+    expect(result.iterations).toBe(1);
+    expect((mockSpawn.mock.calls[1] as unknown[])[0]).toBe('codex');
+  });
+
+  it('treats x-ratelimit-reset header as rate limit for provider fallback', async () => {
+    const futureEpochSecs = Math.floor((Date.now() + 60_000) / 1000);
+    queueMock({ stderr: `x-ratelimit-reset: ${futureEpochSecs}`, exitCode: 1 });
     queueMock({ stdout: 'Codex recovered\n<promise>IMPL_X_DONE</promise>', exitCode: 0 });
 
     const loop = new RalphLoop();
@@ -447,6 +466,24 @@ describe('RalphLoop — Rate Limit Resilience', () => {
     expect(onRateLimit).toHaveBeenCalledWith('claude');
   });
 
+  it('ignores onRateLimit return value for provider control', async () => {
+    const onRateLimit = vi.fn().mockReturnValue('claude');
+
+    queueMock({ stderr: 'rate limit exceeded', exitCode: 1 });
+    queueMock({ stdout: 'ok\n<promise>IMPL_X_DONE</promise>', exitCode: 0 });
+
+    const loop = new RalphLoop();
+    const result = await loop.run(baseConfig({
+      maxIterations: 1,
+      providers: ['claude', 'codex'],
+      onRateLimit,
+    }));
+
+    expect(result.completed).toBe(true);
+    expect(onRateLimit).toHaveBeenCalledWith('claude');
+    expect((mockSpawn.mock.calls[1] as unknown[])[0]).toBe('codex');
+  });
+
   // ── Single-provider config ──
 
   it('single-provider rate limit → sleeps immediately (no fallback)', async () => {
@@ -558,5 +595,79 @@ describe('RalphLoop — Rate Limit Resilience', () => {
     await expect(runPromise).rejects.toThrow(/abort/i);
     expect(vi.getTimerCount()).toBe(0);
     vi.useRealTimers();
+  });
+
+  // ── Timeout must NOT be confused with rate limiting ──
+
+  it('does not treat timed-out iteration as rate-limited even when stdout contains rate-limit text', async () => {
+    vi.useFakeTimers();
+
+    // Create a child that emits rate-limit-related code output then hangs
+    const child = Object.assign(new EventEmitter(), {
+      stdout: new EventEmitter(),
+      stderr: new EventEmitter(),
+      stdin: null,
+      kill: vi.fn(),
+      pid: 12345,
+    }) as unknown as ChildProcess;
+
+    // Emit stdout with rate-limit text (simulates implementing rate limiting)
+    process.nextTick(() => {
+      (child.stdout as EventEmitter).emit('data', Buffer.from(
+        'Adding rate_limit detection and 429 status handling\nif (status === 429) { retry(); }'
+      ));
+    });
+
+    // SIGTERM triggers close with code 143
+    (child.kill as ReturnType<typeof vi.fn>).mockImplementation((signal: string) => {
+      if (signal === 'SIGTERM') {
+        process.nextTick(() => child.emit('close', 143));
+      }
+      return true;
+    });
+
+    mockSpawn.mockImplementationOnce(() => child);
+    // Second iteration succeeds
+    queueMock({ stdout: 'done\n<promise>IMPL_X_DONE</promise>', exitCode: 0 });
+
+    const onRateLimit = vi.fn();
+    const onIteration = vi.fn();
+    const loop = new RalphLoop();
+    const runPromise = loop.run(baseConfig({
+      maxIterations: 2,
+      timeoutMs: 1_000,
+      onRateLimit,
+      onIteration,
+    }));
+
+    // Advance past timeout + close + second iteration
+    await vi.advanceTimersByTimeAsync(13_100);
+    const result = await runPromise;
+
+    expect(result.completed).toBe(true);
+    expect(result.iterations).toBe(2); // Both iterations counted (no retry)
+    expect(onRateLimit).not.toHaveBeenCalled();
+
+    const firstIter = (onIteration.mock.calls[0] as [number, IterationResult]);
+    expect(firstIter[1].rateLimited).toBe(false);
+
+    vi.useRealTimers();
+  });
+
+  it('only detects rate limits from stderr, not from stdout code output', async () => {
+    // Stdout has "rate limit" text (code about rate limiting) but stderr is clean
+    queueMock({
+      stdout: 'function handleRateLimit(status: 429) { ... }\n<promise>IMPL_X_DONE</promise>',
+      stderr: '',
+      exitCode: 0,
+    });
+
+    const onRateLimit = vi.fn();
+    const loop = new RalphLoop();
+    const result = await loop.run(baseConfig({ onRateLimit }));
+
+    expect(result.completed).toBe(true);
+    expect(result.iterations).toBe(1);
+    expect(onRateLimit).not.toHaveBeenCalled();
   });
 });

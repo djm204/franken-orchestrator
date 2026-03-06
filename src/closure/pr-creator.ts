@@ -61,8 +61,9 @@ export class PrCreator {
       return null;
     }
 
-    const title = buildTitle(result.projectId, outcomes.length);
-    const body = buildBody(result, outcomes);
+    const gitContext = this.gatherGitContext(this.config.targetBranch, logger);
+    const title = buildTitle(result.projectId, outcomes);
+    const body = buildBody(result, outcomes, gitContext);
 
     try {
       const output = this.exec(
@@ -118,12 +119,43 @@ export class PrCreator {
       return null;
     }
   }
+
+  private gatherGitContext(targetBranch: string, logger?: ILogger): GitContext {
+    const diffStat = this.safeExec(`git diff --stat ${targetBranch}...HEAD`, logger) ?? '';
+    const logOutput = this.safeExec(
+      `git log --oneline ${targetBranch}...HEAD`,
+      logger,
+    ) ?? '';
+    const shortstat = this.safeExec(`git diff --shortstat ${targetBranch}...HEAD`, logger) ?? '';
+
+    return { diffStat, logOutput, shortstat: shortstat.trim() };
+  }
 }
 
-function buildTitle(projectId: string, chunkCount: number): string {
+interface GitContext {
+  readonly diffStat: string;
+  readonly logOutput: string;
+  readonly shortstat: string;
+}
+
+function buildTitle(projectId: string, outcomes: readonly TaskOutcome[]): string {
+  // Extract unique chunk names (strip impl:/harden: prefixes, deduplicate)
+  const chunkNames = [...new Set(
+    outcomes.map(o => o.taskId.replace(/^(impl|harden):/, '')),
+  )];
+
   const prefix = 'feat: ';
-  const suffix = ` - ${chunkCount} chunks completed`;
   const maxLength = 70;
+
+  // Try to build a descriptive title from chunk names
+  if (chunkNames.length <= 3) {
+    const joined = chunkNames.join(', ');
+    const title = `${prefix}${joined}`;
+    if (title.length <= maxLength) return title;
+  }
+
+  // Fall back to count-based title
+  const suffix = ` (${chunkNames.length} chunks)`;
   const available = maxLength - prefix.length - suffix.length;
   const trimmedProject = available > 0
     ? (projectId.length > available ? `${projectId.slice(0, Math.max(available - 3, 0))}...` : projectId)
@@ -132,35 +164,190 @@ function buildTitle(projectId: string, chunkCount: number): string {
   return title.length > maxLength ? title.slice(0, maxLength - 3) + '...' : title;
 }
 
-function buildBody(result: BeastResult, outcomes: readonly TaskOutcome[]): string {
+function buildBody(
+  result: BeastResult,
+  outcomes: readonly TaskOutcome[],
+  gitContext?: GitContext,
+): string {
   const succeeded = outcomes.filter(o => o.status === 'success').length;
   const failed = outcomes.filter(o => o.status === 'failure').length;
   const skipped = outcomes.filter(o => o.status === 'skipped').length;
 
-  const lines = [
-    '## Summary',
-    `- Project: ${result.projectId}`,
-    `- Status: ${result.status}`,
-    `- Tasks: ${succeeded}/${outcomes.length} succeeded (${failed} failed, ${skipped} skipped)`,
-    '',
-    '## Tasks',
-    '| Chunk | Status | Iterations |',
-    '| --- | --- | --- |',
-  ];
+  const lines: string[] = [];
 
-  for (const outcome of outcomes) {
-    lines.push(`| ${outcome.taskId} | ${outcome.status} | ${formatIterations(outcome)} |`);
+  // ── What Changed ──
+  lines.push('## What Changed');
+  const chunkDescriptions = buildChunkDescriptions(outcomes, gitContext);
+  if (chunkDescriptions.length > 0) {
+    for (const desc of chunkDescriptions) {
+      lines.push(`- ${desc}`);
+    }
+  } else {
+    lines.push(`- ${succeeded} tasks completed across ${result.projectId}`);
   }
+  lines.push('');
+
+  // ── Stats ──
+  lines.push('## Stats');
+  lines.push(`- **Status**: ${result.status}`);
+  lines.push(`- **Tasks**: ${succeeded}/${outcomes.length} succeeded`
+    + (failed > 0 ? `, ${failed} failed` : '')
+    + (skipped > 0 ? `, ${skipped} skipped` : ''));
+  if (result.durationMs > 0) {
+    lines.push(`- **Duration**: ${formatDuration(result.durationMs)}`);
+  }
+  if (result.tokenSpend.estimatedCostUsd > 0) {
+    lines.push(`- **Estimated Cost**: $${result.tokenSpend.estimatedCostUsd.toFixed(2)}`);
+  }
+  if (result.tokenSpend.totalTokens > 0) {
+    lines.push(`- **Tokens**: ${formatTokenCount(result.tokenSpend.totalTokens)}`);
+  }
+  lines.push('');
+
+  // ── Files Changed ──
+  if (gitContext?.shortstat) {
+    lines.push('## Files Changed');
+    lines.push(`\`${gitContext.shortstat}\``);
+    lines.push('');
+
+    // Show file-level diff stat (truncated for large PRs)
+    if (gitContext.diffStat) {
+      const statLines = gitContext.diffStat.split('\n').filter(l => l.trim());
+      // Remove the summary line (last line duplicates shortstat)
+      const fileLines = statLines.slice(0, -1);
+      if (fileLines.length > 0) {
+        const shown = fileLines.slice(0, 30);
+        lines.push('<details>');
+        lines.push(`<summary>${fileLines.length} files</summary>`);
+        lines.push('');
+        lines.push('```');
+        for (const line of shown) {
+          lines.push(line);
+        }
+        if (fileLines.length > 30) {
+          lines.push(`... and ${fileLines.length - 30} more files`);
+        }
+        lines.push('```');
+        lines.push('</details>');
+        lines.push('');
+      }
+    }
+  }
+
+  // ── Task Details ──
+  lines.push('<details>');
+  lines.push('<summary>Task Details</summary>');
+  lines.push('');
+  lines.push('| Task | Status | Iterations |');
+  lines.push('| --- | --- | --- |');
+  for (const outcome of outcomes) {
+    const statusIcon = outcome.status === 'success' ? 'pass' : outcome.status === 'failure' ? 'FAIL' : 'skip';
+    lines.push(`| ${outcome.taskId} | ${statusIcon} | ${formatIterations(outcome)} |`);
+  }
+  lines.push('');
+  lines.push('</details>');
+  lines.push('');
+
+  // ── Commit Log ──
+  if (gitContext?.logOutput) {
+    const commits = gitContext.logOutput.split('\n').filter(l => l.trim());
+    if (commits.length > 0) {
+      lines.push('<details>');
+      lines.push(`<summary>Commit Log (${commits.length} commits)</summary>`);
+      lines.push('');
+      const shown = commits.slice(0, 50);
+      for (const commit of shown) {
+        lines.push(`- \`${commit.trim()}\``);
+      }
+      if (commits.length > 50) {
+        lines.push(`- ... and ${commits.length - 50} more`);
+      }
+      lines.push('');
+      lines.push('</details>');
+      lines.push('');
+    }
+  }
+
+  lines.push('---');
+  lines.push('*Automated by Frankenbeast*');
 
   return lines.join('\n');
 }
 
-function formatIterations(outcome: TaskOutcome): string {
+function buildChunkDescriptions(
+  outcomes: readonly TaskOutcome[],
+  gitContext?: GitContext,
+): string[] {
+  // Group outcomes by chunk name (strip impl:/harden: prefix)
+  const chunkMap = new Map<string, { impl: boolean; harden: boolean; iterations: number }>();
+  for (const o of outcomes) {
+    const isImpl = o.taskId.startsWith('impl:');
+    const isHarden = o.taskId.startsWith('harden:');
+    const name = o.taskId.replace(/^(impl|harden):/, '');
+
+    const entry = chunkMap.get(name) ?? { impl: false, harden: false, iterations: 0 };
+    if (isImpl) entry.impl = o.status === 'success';
+    if (isHarden) entry.harden = o.status === 'success';
+    entry.iterations += getIterationCount(o);
+    chunkMap.set(name, entry);
+  }
+
+  // Count commits per chunk from git log
+  const commitCounts = new Map<string, number>();
+  if (gitContext?.logOutput) {
+    for (const line of gitContext.logOutput.split('\n')) {
+      for (const [chunkName] of chunkMap) {
+        if (line.includes(chunkName)) {
+          commitCounts.set(chunkName, (commitCounts.get(chunkName) ?? 0) + 1);
+        }
+      }
+    }
+  }
+
+  const descriptions: string[] = [];
+  for (const [name, info] of chunkMap) {
+    const humanName = name.replace(/_/g, ' ').replace(/^\d+\s*/, '');
+    const stages: string[] = [];
+    if (info.impl) stages.push('implemented');
+    if (info.harden) stages.push('hardened');
+    const stageStr = stages.length > 0 ? stages.join(' + ') : 'processed';
+
+    const commits = commitCounts.get(name);
+    const commitStr = commits ? ` (${commits} commit${commits !== 1 ? 's' : ''})` : '';
+
+    descriptions.push(`**${humanName}**: ${stageStr}${commitStr}`);
+  }
+
+  return descriptions;
+}
+
+function getIterationCount(outcome: TaskOutcome): number {
   const output = outcome.output as { iterations?: unknown } | undefined;
   if (output && typeof output === 'object' && typeof output.iterations === 'number') {
-    return String(output.iterations);
+    return output.iterations;
   }
-  return '-';
+  return 0;
+}
+
+function formatIterations(outcome: TaskOutcome): string {
+  const count = getIterationCount(outcome);
+  return count > 0 ? String(count) : '-';
+}
+
+function formatDuration(ms: number): string {
+  if (ms < 60_000) return `${(ms / 1000).toFixed(1)}s`;
+  const minutes = Math.floor(ms / 60_000);
+  const seconds = Math.round((ms % 60_000) / 1000);
+  if (minutes < 60) return `${minutes}m ${seconds}s`;
+  const hours = Math.floor(minutes / 60);
+  const remainingMinutes = minutes % 60;
+  return `${hours}h ${remainingMinutes}m`;
+}
+
+function formatTokenCount(tokens: number): string {
+  if (tokens < 1000) return String(tokens);
+  if (tokens < 1_000_000) return `${(tokens / 1000).toFixed(1)}k`;
+  return `${(tokens / 1_000_000).toFixed(2)}M`;
 }
 
 function shellEscape(value: string): string {

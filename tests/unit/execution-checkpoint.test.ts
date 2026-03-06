@@ -58,11 +58,11 @@ describe('execution checkpoint wiring', () => {
     );
 
     expect(outcomes).toHaveLength(1);
-    expect(outcomes[0]!.status).toBe('skipped');
+    expect(outcomes[0]!.status).toBe('success');
     expect(checkpoint.has).toHaveBeenCalledWith('t1:done');
   });
 
-  it('produces TaskOutcome with status skipped for checkpointed tasks', async () => {
+  it('produces TaskOutcome with status success for checkpointed tasks', async () => {
     const checkpoint = makeCheckpoint({
       has: vi.fn((key: string) => key === 't1:done'),
     });
@@ -81,8 +81,8 @@ describe('execution checkpoint wiring', () => {
     );
 
     expect(outcomes[0]!.taskId).toBe('t1');
-    expect(outcomes[0]!.status).toBe('skipped');
-    // Should NOT execute (no trace recorded for skipped-by-checkpoint)
+    expect(outcomes[0]!.status).toBe('success');
+    // Should NOT execute (no trace recorded for checkpointed tasks)
     expect(memory.recordTrace).not.toHaveBeenCalled();
   });
 
@@ -171,7 +171,7 @@ describe('execution checkpoint wiring', () => {
     );
 
     expect(outcomes).toHaveLength(2);
-    expect(outcomes[0]!.status).toBe('skipped'); // t1 checkpointed
+    expect(outcomes[0]!.status).toBe('success'); // t1 checkpointed
     expect(outcomes[1]!.status).toBe('success'); // t2 still runs
     // t2 should still be marked as completed in checkpoint
     expect(checkpoint.write).toHaveBeenCalledWith('t2:done');
@@ -205,8 +205,8 @@ describe('execution checkpoint wiring', () => {
       checkpoint,
     );
 
-    // t1 was skipped due to checkpoint, t2 should execute (not blocked by unmet deps)
-    expect(outcomes[0]!.status).toBe('skipped');
+    // t1 completed via checkpoint, t2 should execute (not blocked by unmet deps)
+    expect(outcomes[0]!.status).toBe('success');
     expect(outcomes[1]!.status).toBe('success');
   });
 
@@ -416,6 +416,45 @@ describe('dirty file resume logic', () => {
     expect(outcomes[0]!.status).toBe('success');
     expect(cliExec.execute).toHaveBeenCalled();
   });
+
+  it('returns task failure when recoverDirtyFiles throws (does not abort execution phase)', async () => {
+    const checkpoint = makeCheckpoint({
+      has: vi.fn(() => false),
+      lastCommit: vi.fn(() => 'abc123'),
+    });
+    const cliExec = {
+      execute: vi.fn(async (): Promise<SkillResult> => ({
+        output: 'cli-output',
+        tokensUsed: 5,
+      })),
+      recoverDirtyFiles: vi.fn(async () => {
+        throw new Error('recovery exploded');
+      }),
+    } as unknown as CliSkillExecutor;
+    const skills = makeSkills({
+      hasSkill: vi.fn(() => true),
+      getAvailableSkills: vi.fn(() => [
+        { id: 'build', name: 'Build', requiresHitl: false, executionType: 'cli' as const },
+      ]),
+    });
+    const memory = makeMemory();
+    const c = ctx([
+      { id: 't1', objective: 'build', requiredSkills: ['build'], dependsOn: [] },
+    ]);
+
+    const outcomes = await runExecution(
+      c, skills, makeGovernor(), memory, makeObserver(),
+      undefined, makeLogger(), cliExec, checkpoint,
+    );
+
+    expect(outcomes).toHaveLength(1);
+    expect(outcomes[0]!.status).toBe('failure');
+    expect(outcomes[0]!.error).toContain('recovery exploded');
+    expect(cliExec.execute).not.toHaveBeenCalled();
+    expect(memory.recordTrace).toHaveBeenCalledWith(
+      expect.objectContaining({ taskId: 't1', outcome: 'failure' }),
+    );
+  });
 });
 
 describe('CliSkillExecutor.recoverDirtyFiles', () => {
@@ -495,6 +534,21 @@ describe('CliSkillExecutor.recoverDirtyFiles', () => {
     expect(result).toBe('committed');
     expect(git.autoCommit).toHaveBeenCalledWith('t1', 'recovery', 0);
     expect(checkpoint.recordCommit).toHaveBeenCalledWith('t1', 'impl', -1, 'recovery_hash');
+  });
+
+  it('normalizes stage-prefixed taskId before recovery auto-commit', async () => {
+    const git = makeMockGit();
+    git.getStatus.mockReturnValue('M src/file.ts');
+    mockVerifyPass();
+    const { CliSkillExecutor } = await import('../../src/skills/cli-skill-executor.js');
+    const executor = new CliSkillExecutor(makeMockRalph() as any, git as any, makeMockObserver(), 'echo ok');
+
+    const checkpoint = makeCheckpoint({ lastCommit: vi.fn(() => 'abc123') });
+    const result = await executor.recoverDirtyFiles('impl:11_rate_limit_resilience', 'impl', checkpoint, makeLogger());
+
+    expect(result).toBe('committed');
+    expect(git.autoCommit).toHaveBeenCalledWith('11_rate_limit_resilience', 'recovery', 0);
+    expect(checkpoint.recordCommit).toHaveBeenCalledWith('impl:11_rate_limit_resilience', 'impl', -1, 'recovery_hash');
   });
 
   it('resets to last commit when verification fails', async () => {

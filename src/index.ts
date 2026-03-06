@@ -77,7 +77,7 @@ export type { GraphBuilder } from './planning/chunk-file-graph-builder.js';
 
 // CLI skill execution
 export { CliSkillExecutor } from './skills/cli-skill-executor.js';
-export { RalphLoop } from './skills/ralph-loop.js';
+export { RalphLoop, parseResetTime } from './skills/ralph-loop.js';
 export { GitBranchIsolator } from './skills/git-branch-isolator.js';
 export type {
   CliSkillConfig,

@@ -260,6 +260,29 @@ describe('BeastLogger', () => {
         expect(entry).toMatch(/^\[\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\] \[(INFO|WARN|ERROR|DEBUG)\]/);
       }
     });
+
+    it('captures debug entries to file even when not verbose', () => {
+      const logger = new BeastLogger({ verbose: false, captureForFile: true });
+      logger.debug('hidden from terminal but captured', { key: 'val' });
+
+      const entries = logger.getLogEntries();
+      expect(entries).toHaveLength(1);
+      expect(entries[0]).toContain('[DEBUG]');
+      expect(entries[0]).toContain('hidden from terminal but captured');
+      // Should NOT have printed to console
+      expect(consoleLogSpy).not.toHaveBeenCalled();
+    });
+
+    it('includes structured metadata in captured file entries', () => {
+      const logger = new BeastLogger({ verbose: true, captureForFile: true });
+      logger.error('Execution: task failed', { taskId: 'impl:11_rate_limit_resilience', error: 'boom' });
+
+      const entries = logger.getLogEntries();
+      expect(entries).toHaveLength(1);
+      expect(entries[0]).toContain('Execution: task failed');
+      expect(entries[0]).toContain('"taskId":"impl:11_rate_limit_resilience"');
+      expect(entries[0]).toContain('"error":"boom"');
+    });
   });
 
   describe('ILogger interface compliance', () => {
@@ -277,6 +300,16 @@ describe('BeastLogger', () => {
       logger.info('test', { key: 'value' });
       logger.warn('test', { key: 'value' });
       logger.error('test', { key: 'value' });
+    });
+
+    it('prints error metadata to console output', () => {
+      const logger = new BeastLogger({ verbose: false });
+      logger.error('failure', { taskId: 't1', error: 'boom' });
+      const output = consoleLogSpy.mock.calls[0]![0] as string;
+      const plain = stripAnsi(output);
+      expect(plain).toContain('failure');
+      expect(plain).toContain('"taskId":"t1"');
+      expect(plain).toContain('"error":"boom"');
     });
   });
 });

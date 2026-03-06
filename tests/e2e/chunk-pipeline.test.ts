@@ -90,20 +90,37 @@ describe.skipIf(!process.env['E2E'])('E2E: Chunk Pipeline', () => {
     // 2. Create ChunkFileGraphBuilder(tmpDir) — real implementation
     const graphBuilder = new ChunkFileGraphBuilder(tmpDir);
 
-    // 3. Mock RalphLoop — returns promise-tagged output on each call
+    // 3. Mock RalphLoop — invokes onIteration then returns promise-tagged output
     const mockRalph = {
-      run: vi.fn().mockResolvedValue({
-        completed: true,
-        iterations: 1,
-        output: 'Implementation complete\n<promise>IMPL_01_test_feature_DONE</promise>',
-        tokensUsed: 100,
+      run: vi.fn().mockImplementation(async (config: { onIteration?: (i: number, r: unknown) => void }) => {
+        // Simulate one iteration with onIteration callback (generates per-commit checkpoint entries)
+        config.onIteration?.(1, {
+          iteration: 1,
+          exitCode: 0,
+          stdout: 'Implementation complete\n<promise>IMPL_01_test_feature_DONE</promise>',
+          stderr: '',
+          durationMs: 100,
+          rateLimited: false,
+          promiseDetected: true,
+          tokensEstimated: 50,
+        });
+        return {
+          completed: true,
+          iterations: 1,
+          output: 'Implementation complete\n<promise>IMPL_01_test_feature_DONE</promise>',
+          tokensUsed: 100,
+        };
       }),
     } as unknown as RalphLoop;
 
-    // 4. Mock GitBranchIsolator — simulates branch create + merge
+    // 4. Mock GitBranchIsolator — simulates branch create, autoCommit, merge
     const mockGit = {
       isolate: vi.fn(),
       merge: vi.fn().mockReturnValue({ merged: true, commits: 1 }),
+      autoCommit: vi.fn().mockReturnValue(true),
+      getCurrentHead: vi.fn().mockReturnValue('abc123'),
+      getStatus: vi.fn().mockReturnValue(''),
+      getWorkingDir: vi.fn().mockReturnValue(tmpDir),
     } as unknown as GitBranchIsolator;
 
     // 5. Create FileCheckpointStore with a real tmp file
@@ -173,13 +190,17 @@ describe.skipIf(!process.env['E2E'])('E2E: Chunk Pipeline', () => {
     // tokenSpend.totalTokens > 0
     expect(result.tokenSpend.totalTokens).toBeGreaterThan(0);
 
-    // Checkpoint file contains per-task done entries
+    // Checkpoint file contains milestone entries (per-task done)
     const checkpointData = checkpoint.readAll();
     expect(checkpointData.has('impl:01_test_feature:done')).toBe(true);
     expect(checkpointData.has('harden:01_test_feature:done')).toBe(true);
 
-    // Verify checkpoint file has real content on disk
+    // Checkpoint file contains per-commit entries (from onIteration callback)
     const rawCheckpoint = readFileSync(checkpointPath, 'utf-8');
+    expect(rawCheckpoint).toContain('impl:01_test_feature:impl:iter_1:commit_abc123');
+    expect(rawCheckpoint).toContain('harden:01_test_feature:impl:iter_1:commit_abc123');
+
+    // Verify milestone entries also on disk
     expect(rawCheckpoint).toContain('impl:01_test_feature:done');
     expect(rawCheckpoint).toContain('harden:01_test_feature:done');
 
