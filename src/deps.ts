@@ -180,6 +180,16 @@ export interface McpToolInfo {
   readonly description: string;
 }
 
+/** Checkpoint persistence for crash recovery. */
+export interface ICheckpointStore {
+  has(key: string): boolean;
+  write(key: string): void;
+  readAll(): Set<string>;
+  clear(): void;
+  recordCommit(taskId: string, stage: string, iteration: number, commitHash: string): void;
+  lastCommit(taskId: string, stage: string): string | undefined;
+}
+
 /** Full dependency bag for the Beast Loop. */
 export interface BeastLoopDeps {
   readonly firewall: IFirewallModule;
@@ -194,6 +204,7 @@ export interface BeastLoopDeps {
   readonly mcp?: IMcpModule;
   readonly cliExecutor?: CliSkillExecutor;
   readonly clock: () => Date;
+  readonly checkpoint?: ICheckpointStore;
 }
 
 type _TypesAndInterfacesTest = {

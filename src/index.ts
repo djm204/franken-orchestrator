@@ -4,6 +4,7 @@ export { BeastLoop } from './beast-loop.js';
 // Dependencies
 export type { BeastLoopDeps } from './deps.js';
 export type {
+  ICheckpointStore,
   IFirewallModule,
   FirewallResult,
   FirewallViolation,
@@ -74,6 +75,9 @@ export type {
   RalphLoopResult,
   IterationResult,
 } from './skills/cli-types.js';
+
+// Checkpoint
+export { FileCheckpointStore } from './checkpoint/file-checkpoint-store.js';
 
 // Resilience
 export {
