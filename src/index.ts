@@ -64,6 +64,10 @@ export { AdapterLlmClient } from './adapters/adapter-llm-client.js';
 export { LlmSkillHandler } from './skills/llm-skill-handler.js';
 export { LlmPlanner } from './skills/llm-planner.js';
 
+// Planning
+export { ChunkFileGraphBuilder } from './planning/chunk-file-graph-builder.js';
+export type { GraphBuilder } from './planning/chunk-file-graph-builder.js';
+
 // CLI skill execution
 export { CliSkillExecutor } from './skills/cli-skill-executor.js';
 export { RalphLoop } from './skills/ralph-loop.js';
