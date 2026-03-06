@@ -10,6 +10,8 @@ export type {
   FirewallViolation,
   ISkillsModule,
   SkillDescriptor,
+  SkillInput,
+  SkillResult,
   IMemoryModule,
   MemoryContext,
   EpisodicEntry,
@@ -28,6 +30,7 @@ export type {
   ApprovalOutcome,
   IHeartbeatModule,
   HeartbeatPulseResult,
+  ILogger,
 } from './deps.js';
 
 // Types
@@ -83,6 +86,18 @@ export type {
 
 // Checkpoint
 export { FileCheckpointStore } from './checkpoint/file-checkpoint-store.js';
+
+// Logging
+export {
+  BeastLogger,
+  stripAnsi,
+  budgetBar,
+  statusBadge,
+  logHeader,
+  BANNER,
+  ANSI,
+} from './logging/beast-logger.js';
+export type { BeastLoggerOptions } from './logging/beast-logger.js';
 
 // Resilience
 export {
