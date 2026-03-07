@@ -91,7 +91,7 @@ export class CliSkillExecutor {
   private readonly git: GitBranchIsolator;
   private readonly observer: ObserverDeps;
   private readonly verifyCommand?: string | undefined;
-  private readonly commitMessageFn?: CommitMessageFn;
+  private readonly commitMessageFn?: CommitMessageFn | undefined;
 
   constructor(ralph: RalphLoop, git: GitBranchIsolator, observer: ObserverDeps, verifyCommand?: string, commitMessageFn?: CommitMessageFn) {
     this.ralph = ralph;
