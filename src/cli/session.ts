@@ -107,7 +107,7 @@ export class Session {
 
   private async runPlan(): Promise<void> {
     const { paths, io, designDocPath } = this.config;
-    const { cliLlmAdapter } = createCliDeps(this.buildDepOptions());
+    const { cliLlmAdapter, logger } = createCliDeps(this.buildDepOptions());
 
     // Load design doc
     let designContent: string;
@@ -124,7 +124,7 @@ export class Session {
     const adapterLlm = new AdapterLlmClient(cliLlmAdapter);
     const llmGraphBuilder = new LlmGraphBuilder(adapterLlm);
 
-    io.display('Decomposing design into implementation chunks...\n');
+    logger.info('Decomposing design into chunks...', 'planner');
 
     // Build the plan graph to get chunk definitions
     const planGraph = await llmGraphBuilder.build({ goal: designContent });
@@ -177,13 +177,13 @@ export class Session {
     const sigintHandler = async () => {
       if (stopping) process.exit(1);
       stopping = true;
-      logger.warn('SIGINT received. Finishing current iteration then stopping...');
+      logger.warn('SIGINT received. Finishing current iteration then stopping...', 'session');
       await finalize();
       process.exit(0);
     };
     process.on('SIGINT', sigintHandler);
 
-    logger.info(`Budget: $${budget} | Provider: ${ANSI.bold}${this.config.provider}${ANSI.reset}`);
+    logger.info(`Budget: $${budget} | Provider: ${ANSI.bold}${this.config.provider}${ANSI.reset}`, 'session');
 
     const result = await new BeastLoop(fullDeps).run({
       projectId,

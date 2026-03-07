@@ -404,10 +404,12 @@ describe('CliSkillExecutor', () => {
       expect(logger.warn).toHaveBeenCalledWith(
         'RalphLoop: sleeping for rate limit reset',
         expect.objectContaining({ chunkId: '01_types', durationMs: 30_000 }),
+        'ralph',
       );
       expect(logger.info).toHaveBeenCalledWith(
         'RalphLoop: iteration complete',
         expect.objectContaining({ chunkId: '01_types', iteration: 1, rateLimited: true }),
+        'ralph',
       );
     });
   });

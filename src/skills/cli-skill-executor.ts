@@ -4,6 +4,47 @@ import type { SkillInput, SkillResult, ICheckpointStore, ILogger } from '../deps
 import type { RalphLoop } from './ralph-loop.js';
 import type { GitBranchIsolator } from './git-branch-isolator.js';
 
+// ── Number formatting ──
+
+function formatNumber(n: number): string {
+  return n.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+}
+
+// ── Iteration progress display ──
+
+export function formatIterationProgress(opts: {
+  chunkId: string;
+  iteration: number;
+  maxIterations: number;
+  durationMs?: number;
+  tokensEstimated?: number;
+}): string {
+  const parts = [
+    `[ralph] Iteration ${opts.iteration}/${opts.maxIterations}`,
+    `chunk: ${opts.chunkId}`,
+  ];
+  if (opts.durationMs !== undefined) {
+    parts.push(`${Math.round(opts.durationMs / 1000)}s elapsed`);
+  }
+  if (opts.tokensEstimated !== undefined) {
+    parts.push(`~${formatNumber(opts.tokensEstimated)} tokens`);
+  }
+  return parts.join(' | ');
+}
+
+export function writeProgress(
+  line: string,
+  opts: { final: boolean; isTTY?: boolean; write?: (s: string) => void },
+): void {
+  const write = opts.write ?? process.stdout.write.bind(process.stdout);
+  const tty = opts.isTTY ?? process.stdout.isTTY ?? false;
+  if (tty) {
+    write(`\r\x1b[K${line}${opts.final ? '\n' : ''}`);
+  } else {
+    write(`${line}\n`);
+  }
+}
+
 // ── Observer interfaces (no direct @frankenbeast/observer import) ──
 
 export interface Span {
@@ -132,7 +173,7 @@ export class CliSkillExecutor {
         const lastHash = checkpoint.lastCommit(taskId, stage);
         if (lastHash) {
           this.git.resetHard(lastHash);
-          logger?.warn('Recovery: reset to last good commit', { taskId, commitHash: lastHash });
+          logger?.warn('Recovery: reset to last good commit', { taskId, commitHash: lastHash }, 'git');
         }
         return 'reset';
       }
@@ -142,7 +183,7 @@ export class CliSkillExecutor {
     this.git.autoCommit(chunkId, 'recovery', 0);
     const commitHash = this.git.getCurrentHead();
     checkpoint.recordCommit(taskId, stage, -1, commitHash);
-    logger?.info('Recovery: auto-committed dirty files', { taskId });
+    logger?.info('Recovery: auto-committed dirty files', { taskId }, 'git');
     return 'committed';
   }
 
@@ -198,23 +239,28 @@ export class CliSkillExecutor {
       ...ralphDefaults,
       ...config.ralph,
       onRateLimit: (provider: string) => {
-        this.logger?.warn('RalphLoop: provider rate limited', { chunkId, provider });
+        this.logger?.warn('RalphLoop: provider rate limited', { chunkId, provider }, 'ralph');
         return config.ralph?.onRateLimit?.(provider);
       },
       onProviderAttempt: (provider: string, iteration: number) => {
-        this.logger?.info('RalphLoop: provider attempt', { chunkId, provider, iteration });
+        this.logger?.info('RalphLoop: provider attempt', { chunkId, provider, iteration }, 'ralph');
+        // Show in-place progress line (overwritten by next update or final summary)
+        writeProgress(
+          formatIterationProgress({ chunkId, iteration, maxIterations: wrappedConfig.maxIterations }),
+          { final: false },
+        );
         config.ralph?.onProviderAttempt?.(provider, iteration);
       },
       onProviderSwitch: (fromProvider: string, toProvider: string, reason: 'rate-limit' | 'post-sleep-reset') => {
-        this.logger?.warn('RalphLoop: provider switch', { chunkId, fromProvider, toProvider, reason });
+        this.logger?.warn('RalphLoop: provider switch', { chunkId, fromProvider, toProvider, reason }, 'ralph');
         config.ralph?.onProviderSwitch?.(fromProvider, toProvider, reason);
       },
       onSpawnError: (provider: string, error: string) => {
-        this.logger?.error('RalphLoop: provider spawn error', { chunkId, provider, error });
+        this.logger?.error('RalphLoop: provider spawn error', { chunkId, provider, error }, 'ralph');
         config.ralph?.onSpawnError?.(provider, error);
       },
       onProviderTimeout: (provider: string, timeoutMs: number) => {
-        this.logger?.warn('RalphLoop: provider iteration timeout', { chunkId, provider, timeoutMs });
+        this.logger?.warn('RalphLoop: provider iteration timeout', { chunkId, provider, timeoutMs }, 'ralph');
         config.ralph?.onProviderTimeout?.(provider, timeoutMs);
       },
       onSleep: (durationMs: number, source: string) => {
@@ -222,10 +268,21 @@ export class CliSkillExecutor {
           chunkId,
           durationMs,
           source,
-        });
+        }, 'ralph');
         config.ralph?.onSleep?.(durationMs, source);
       },
       onIteration: (iteration: number, result: IterationResult) => {
+        // Print final summary line (not overwritten)
+        writeProgress(
+          formatIterationProgress({
+            chunkId,
+            iteration,
+            maxIterations: wrappedConfig.maxIterations,
+            durationMs: result.durationMs,
+            tokensEstimated: result.tokensEstimated,
+          }),
+          { final: true },
+        );
         this.logger?.info('RalphLoop: iteration complete', {
           chunkId,
           iteration,
@@ -233,13 +290,13 @@ export class CliSkillExecutor {
           rateLimited: result.rateLimited,
           promiseDetected: result.promiseDetected,
           sleepMs: result.sleepMs,
-        });
+        }, 'ralph');
         // Full raw output -> build.log only (via debug, always captured)
         if (result.stderr) {
-          this.logger?.debug(`RalphLoop: iter ${iteration} stderr`, { chunkId, stderr: result.stderr });
+          this.logger?.debug(`RalphLoop: iter ${iteration} stderr`, { chunkId, stderr: result.stderr }, 'ralph');
         }
         if (result.stdout) {
-          this.logger?.debug(`RalphLoop: iter ${iteration} stdout`, { chunkId, stdout: result.stdout.slice(0, 4000) });
+          this.logger?.debug(`RalphLoop: iter ${iteration} stdout`, { chunkId, stdout: result.stdout.slice(0, 4000) }, 'ralph');
         }
         // Surface errors on terminal when iteration fails (non-rate-limit)
         if (result.exitCode !== 0 && !result.rateLimited) {
@@ -252,7 +309,7 @@ export class CliSkillExecutor {
             exitCode: result.exitCode,
             ...(stderrExcerpt && { stderr: stderrExcerpt }),
             ...(stdoutExcerpt && { stdout: stdoutExcerpt }),
-          });
+          }, 'ralph');
         }
         // Create iteration span
         const iterSpan = this.observer.startSpan(this.observer.trace, {

@@ -11,10 +11,10 @@ import type { GraphBuilder } from './planning/chunk-file-graph-builder.js';
  */
 
 export interface ILogger {
-  info(msg: string, data?: unknown): void;
-  debug(msg: string, data?: unknown): void;
-  warn(msg: string, data?: unknown): void;
-  error(msg: string, data?: unknown): void;
+  info(msg: string, dataOrSource?: unknown, source?: string): void;
+  debug(msg: string, dataOrSource?: unknown, source?: string): void;
+  warn(msg: string, dataOrSource?: unknown, source?: string): void;
+  error(msg: string, dataOrSource?: unknown, source?: string): void;
 }
 
 /** What the orchestrator needs from MOD-01 (Firewall). */

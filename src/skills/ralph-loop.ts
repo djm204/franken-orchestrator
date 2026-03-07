@@ -141,7 +141,7 @@ function tryExtractTextFromNode(node: unknown, out: string[]): void {
   }
 
   const obj = node as Record<string, unknown>;
-  const directKeys = ['text', 'output_text', 'output', 'message'];
+  const directKeys = ['text', 'output_text', 'output'];
   for (const key of directKeys) {
     const value = obj[key];
     if (typeof value === 'string' && value.trim().length > 0) {
@@ -149,11 +149,74 @@ function tryExtractTextFromNode(node: unknown, out: string[]): void {
     }
   }
 
-  const nestedKeys = ['delta', 'content', 'parts', 'data', 'result', 'response'];
+  const nestedKeys = ['delta', 'content', 'parts', 'data', 'result', 'response', 'message', 'content_block'];
   for (const key of nestedKeys) {
     if (obj[key] !== undefined) {
       tryExtractTextFromNode(obj[key], out);
     }
+  }
+}
+
+/**
+ * Process a single complete line from stream-json output.
+ * If it's valid JSON, extract text content. If plain text, pass through.
+ * Returns empty string for non-text JSON frames or blank lines.
+ */
+export function processStreamLine(line: string): string {
+  const trimmed = line.trim();
+  if (trimmed.length === 0) return '';
+
+  try {
+    const obj = JSON.parse(trimmed) as Record<string, unknown>;
+
+    // Check for thinking content (extended thinking / reasoning)
+    const delta = obj.delta as Record<string, unknown> | undefined;
+    if (delta?.thinking && typeof delta.thinking === 'string') {
+      return `\x1b[2m${delta.thinking}\x1b[0m`;
+    }
+
+    const parts: string[] = [];
+    tryExtractTextFromNode(obj, parts);
+    return parts.join('');
+  } catch {
+    // Not JSON — pass through as plain text
+    return trimmed;
+  }
+}
+
+/**
+ * Line-buffered processor for stream-json output.
+ * Accumulates bytes until newline, then processes each complete line
+ * through processStreamLine. Partial lines are held until completed.
+ */
+export class StreamLineBuffer {
+  private buffer = '';
+
+  /** Push raw data. Returns array of clean text strings (empty entries filtered out). */
+  push(data: string): string[] {
+    this.buffer += data;
+    const lines = this.buffer.split('\n');
+    this.buffer = lines.pop() ?? ''; // last element is incomplete line (or empty after trailing \n)
+
+    const results: string[] = [];
+    for (const line of lines) {
+      const processed = processStreamLine(line);
+      if (processed.length > 0) {
+        results.push(processed);
+      }
+    }
+    return results;
+  }
+
+  /** Flush remaining buffer as plain text. */
+  flush(): string[] {
+    if (this.buffer.trim().length === 0) {
+      this.buffer = '';
+      return [];
+    }
+    const text = this.buffer.trim();
+    this.buffer = '';
+    return [text];
   }
 }
 
@@ -185,7 +248,7 @@ export function normalizeCodexOutput(stdout: string): string {
 function spawnIteration(
   config: RalphLoopConfig,
   provider: 'claude' | 'codex',
-): Promise<{ stdout: string; stderr: string; exitCode: number; timedOut: boolean }> {
+): Promise<{ stdout: string; stderr: string; exitCode: number; timedOut: boolean; cleanStdout: string }> {
   return new Promise((resolve, reject) => {
     const cmd = provider === 'claude' ? config.claudeCmd : config.codexCmd;
     const args = provider === 'claude'
@@ -214,43 +277,27 @@ function spawnIteration(
     let stderr = '';
     let settled = false;
     let timedOut = false;
+    const cleanParts: string[] = [];
+    const streamBuffer = provider === 'claude' ? new StreamLineBuffer() : null;
 
-    const finish = (result: { stdout: string; stderr: string; exitCode: number; timedOut: boolean }): void => {
+    const finish = (result: { stdout: string; stderr: string; exitCode: number; timedOut: boolean; cleanStdout: string }): void => {
       if (settled) return;
       settled = true;
       resolve(result);
     };
 
-    let lineBuffer = '';
-
     child.stdout!.on('data', (chunk: Buffer) => {
       const text = chunk.toString();
       stdout += text;
       // Stream output to terminal so the user can see Claude working
-      if (provider === 'claude') {
-        lineBuffer += text;
-        const lines = lineBuffer.split('\n');
-        lineBuffer = lines.pop() ?? ''; // keep incomplete last line
+      if (streamBuffer) {
+        const lines = streamBuffer.push(text);
         for (const line of lines) {
-          const trimmed = line.trim();
-          if (!trimmed) continue;
-          try {
-            const obj = JSON.parse(trimmed) as Record<string, unknown>;
-            // Check for thinking content (extended thinking / reasoning)
-            const delta = obj.delta as Record<string, unknown> | undefined;
-            if (delta?.thinking && typeof delta.thinking === 'string') {
-              process.stdout.write(`\x1b[2m${delta.thinking}\x1b[0m`);
-              continue;
-            }
-            const parts: string[] = [];
-            tryExtractTextFromNode(obj, parts);
-            if (parts.length > 0) process.stdout.write(parts.join(''));
-          } catch {
-            // Not JSON — show as-is (error messages, startup banners, etc.)
-            process.stdout.write(trimmed + '\n');
-          }
+          cleanParts.push(line);
+          process.stdout.write(line);
         }
       } else {
+        cleanParts.push(text);
         process.stdout.write(text);
       }
     });
@@ -271,18 +318,27 @@ function spawnIteration(
       }, 5_000);
       // Hard fail-safe: if process still hasn't closed, force resolution.
       setTimeout(() => {
+        if (streamBuffer) {
+          const remaining = streamBuffer.flush();
+          for (const line of remaining) cleanParts.push(line);
+        }
         finish({
           stdout,
           stderr: `${stderr}\n[RalphLoop] iteration timed out after ${config.timeoutMs}ms`,
           exitCode: 124,
           timedOut: true,
+          cleanStdout: cleanParts.join('\n'),
         });
       }, 7_000);
     }, config.timeoutMs);
 
     child.on('close', (code) => {
       clearTimeout(timer);
-      finish({ stdout, stderr, exitCode: code ?? 1, timedOut });
+      if (streamBuffer) {
+        const remaining = streamBuffer.flush();
+        for (const line of remaining) cleanParts.push(line);
+      }
+      finish({ stdout, stderr, exitCode: code ?? 1, timedOut, cleanStdout: cleanParts.join('\n') });
     });
 
     child.on('error', (err) => {
@@ -318,7 +374,7 @@ export class RalphLoop {
       const startTime = Date.now();
       config.onProviderAttempt?.(activeProvider, iteration);
 
-      let result: { stdout: string; stderr: string; exitCode: number; timedOut: boolean };
+      let result: { stdout: string; stderr: string; exitCode: number; timedOut: boolean; cleanStdout: string };
       try {
         result = await spawnIteration(config, activeProvider);
       } catch (error) {
@@ -328,9 +384,11 @@ export class RalphLoop {
       }
 
       const durationMs = Date.now() - startTime;
+      // For claude, use the pre-cleaned output from StreamLineBuffer.
+      // For codex, normalize the raw stdout (codex uses a different JSON format).
       const normalizedStdout = activeProvider === 'codex'
         ? normalizeCodexOutput(result.stdout)
-        : result.stdout;
+        : result.cleanStdout;
       lastOutput = normalizedStdout;
 
       const tokenDivisor = activeProvider === 'codex' ? 16 : 4;

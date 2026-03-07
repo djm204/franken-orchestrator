@@ -20,6 +20,7 @@ const A = {
   blue: '\x1b[34m',
   magenta: '\x1b[35m',
   cyan: '\x1b[36m',
+  white: '\x1b[37m',
   gray: '\x1b[90m',
   bgRed: '\x1b[41m',
   bgGreen: '\x1b[42m',
@@ -71,6 +72,39 @@ export const BANNER = `\n${A.green}${A.bold}` +
   '##       ##     ## ##     ## ##    ## ##    ## ######## ##    ## ########  ######## ##     ##  ######     ##\n' +
   `${A.reset}\n`;
 
+// ── Service badge ──
+
+const BADGE_COLORS: Record<string, string> = {
+  ralph: A.cyan,
+  git: A.yellow,
+  observer: A.magenta,
+  planner: A.blue,
+  session: A.green,
+  budget: A.red,
+  config: A.white,
+};
+
+const BADGE_WIDTH = 10;
+
+function formatBadge(source: string): string {
+  const color = BADGE_COLORS[source] ?? A.dim;
+  const badge = `[${source}]`;
+  const padded = badge.padEnd(BADGE_WIDTH);
+  return `${color}${padded}${A.reset} `;
+}
+
+/**
+ * Resolve overloaded (msg, dataOrSource?, source?) arguments.
+ * When the second arg is a string and the third is undefined,
+ * treat the second arg as the source (not data).
+ */
+function resolveArgs(dataOrSource?: unknown, source?: string): { data: unknown; source: string | undefined } {
+  if (typeof dataOrSource === 'string' && source === undefined) {
+    return { data: undefined, source: dataOrSource };
+  }
+  return { data: dataOrSource, source };
+}
+
 // ── Service highlighting ──
 
 function highlightServices(msg: string): string {
@@ -99,35 +133,44 @@ export class BeastLogger implements ILogger {
     this.captureForFile = options.captureForFile ?? false;
   }
 
-  info(msg: string, data?: unknown): void {
+  info(msg: string, dataOrSource?: unknown, source?: string): void {
+    const { data, source: src } = resolveArgs(dataOrSource, source);
     const ts = this.timestamp();
+    const badge = src ? formatBadge(src) : '';
     const display = data !== undefined ? `${msg}  ${formatCompact(data)}` : msg;
-    console.log(`${ts} ${A.cyan}${A.bold} INFO${A.reset} ${display}`);
-    this.capture('INFO', this.withData(msg, data));
+    console.log(`${ts} ${A.cyan}${A.bold} INFO${A.reset} ${badge}${display}`);
+    this.capture('INFO', this.withBadgeAndData(msg, data, src));
   }
 
-  debug(msg: string, data?: unknown): void {
+  debug(msg: string, dataOrSource?: unknown, source?: string): void {
+    const { data, source: src } = resolveArgs(dataOrSource, source);
     const line = this.withData(msg, data);
+    const badgeText = src ? `[${src}] ` : '';
     // Always capture to build.log; only print to terminal in verbose mode
-    this.capture('DEBUG', line);
+    this.capture('DEBUG', `${badgeText}${line}`);
     if (!this.verbose) return;
     const ts = this.timestamp();
+    const badge = src ? formatBadge(src) : '';
     const highlighted = highlightServices(line);
-    console.log(`${ts} ${A.gray}DEBUG ${highlighted}${A.reset}`);
+    console.log(`${ts} ${A.gray}DEBUG ${badge}${highlighted}${A.reset}`);
   }
 
-  warn(msg: string, data?: unknown): void {
+  warn(msg: string, dataOrSource?: unknown, source?: string): void {
+    const { data, source: src } = resolveArgs(dataOrSource, source);
     const ts = this.timestamp();
+    const badge = src ? formatBadge(src) : '';
     const display = data !== undefined ? `${msg}  ${formatCompact(data)}` : msg;
-    console.log(`${ts} ${A.yellow}${A.bold} WARN${A.reset} ${A.yellow}${display}${A.reset}`);
-    this.capture('WARN', this.withData(msg, data));
+    console.log(`${ts} ${A.yellow}${A.bold} WARN${A.reset} ${badge}${A.yellow}${display}${A.reset}`);
+    this.capture('WARN', this.withBadgeAndData(msg, data, src));
   }
 
-  error(msg: string, data?: unknown): void {
+  error(msg: string, dataOrSource?: unknown, source?: string): void {
+    const { data, source: src } = resolveArgs(dataOrSource, source);
     const ts = this.timestamp();
+    const badge = src ? formatBadge(src) : '';
     const line = this.withData(msg, data);
-    console.log(`${ts} ${A.red}${A.bold}ERROR${A.reset} ${A.red}${line}${A.reset}`);
-    this.capture('ERROR', line);
+    console.log(`${ts} ${A.red}${A.bold}ERROR${A.reset} ${badge}${A.red}${line}${A.reset}`);
+    this.capture('ERROR', this.withBadgeAndData(msg, data, src));
   }
 
   /** Get captured log entries for writing to a plain-text log file. */
@@ -150,6 +193,12 @@ export class BeastLogger implements ILogger {
   private withData(msg: string, data: unknown): string {
     if (data === undefined) return msg;
     return `${msg} | ${safeStringify(data)}`;
+  }
+
+  private withBadgeAndData(msg: string, data: unknown, source: string | undefined): string {
+    const badge = source ? `[${source}] ` : '';
+    const body = data !== undefined ? `${msg} | ${safeStringify(data)}` : msg;
+    return `${badge}${body}`;
   }
 }
 

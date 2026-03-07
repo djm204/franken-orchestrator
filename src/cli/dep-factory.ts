@@ -106,6 +106,7 @@ export function createCliDeps(options: CliDepOptions): CliDeps {
 
   const cliExecutor = new CliSkillExecutor(
     ralph, gitIso, observerBridge.observerDeps,
+    undefined, undefined, logger,
   );
 
   // PR creator

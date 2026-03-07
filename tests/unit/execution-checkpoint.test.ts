@@ -567,6 +567,7 @@ describe('CliSkillExecutor.recoverDirtyFiles', () => {
     expect(logger.warn).toHaveBeenCalledWith(
       expect.stringContaining('reset'),
       expect.objectContaining({ taskId: 't1' }),
+      'git',
     );
   });
 
