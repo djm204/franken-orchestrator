@@ -266,6 +266,19 @@ describe('GitBranchIsolator', () => {
     });
   });
 
+  describe('getDiffStat()', () => {
+    it('returns diff stat between base branch and chunk branch', () => {
+      mockExecSync.mockImplementation((cmd: string) => {
+        if (cmd === 'git diff --stat main..chunk/03_my_chunk') {
+          return ' src/foo.ts | 10 +++\n 1 file changed\n';
+        }
+        return '';
+      });
+
+      expect(isolator.getDiffStat('03_my_chunk')).toBe('src/foo.ts | 10 +++\n 1 file changed');
+    });
+  });
+
   describe('shell safety', () => {
     it('rejects chunkIds with shell-unsafe characters', () => {
       expect(() => isolator.isolate('chunk; rm -rf /')).toThrow();

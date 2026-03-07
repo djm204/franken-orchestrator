@@ -83,6 +83,7 @@ function makeMockGit() {
     autoCommit: vi.fn(),
     hasMeaningfulChange: vi.fn(),
     getCurrentHead: vi.fn(),
+    getDiffStat: vi.fn().mockReturnValue('src/foo.ts | 10 +++\n'),
   };
 }
 
@@ -338,6 +339,49 @@ describe('CliSkillExecutor', () => {
       expect(ralph.run).not.toHaveBeenCalled();
       expect(result.output).toContain('Budget exceeded');
       expect(result.tokensUsed).toBe(0);
+    });
+  });
+
+  describe('commit message generation before merge', () => {
+    it('calls commitMessageFn before merge and passes result to merge()', async () => {
+      const commitMessageFn = vi.fn().mockResolvedValue('feat(types): add shared type definitions');
+
+      const { CliSkillExecutor } = await import('../../../src/skills/cli-skill-executor.js');
+      const executor = new CliSkillExecutor(ralph as any, git as any, observer, undefined, commitMessageFn);
+      await executor.execute('cli:01_types', makeSkillInput(), makeCliConfig());
+
+      expect(git.getDiffStat).toHaveBeenCalledWith('01_types');
+      expect(commitMessageFn).toHaveBeenCalledWith('src/foo.ts | 10 +++\n', 'Test objective');
+      expect(git.merge).toHaveBeenCalledWith('01_types', 'feat(types): add shared type definitions');
+    });
+
+    it('passes undefined to merge when commitMessageFn is not provided', async () => {
+      const { CliSkillExecutor } = await import('../../../src/skills/cli-skill-executor.js');
+      const executor = new CliSkillExecutor(ralph as any, git as any, observer);
+      await executor.execute('cli:01_types', makeSkillInput(), makeCliConfig());
+
+      expect(git.merge).toHaveBeenCalledWith('01_types');
+    });
+
+    it('passes undefined to merge when commitMessageFn returns null', async () => {
+      const commitMessageFn = vi.fn().mockResolvedValue(null);
+
+      const { CliSkillExecutor } = await import('../../../src/skills/cli-skill-executor.js');
+      const executor = new CliSkillExecutor(ralph as any, git as any, observer, undefined, commitMessageFn);
+      await executor.execute('cli:01_types', makeSkillInput(), makeCliConfig());
+
+      expect(git.merge).toHaveBeenCalledWith('01_types');
+    });
+
+    it('falls back to no message when commitMessageFn throws', async () => {
+      const commitMessageFn = vi.fn().mockRejectedValue(new Error('LLM down'));
+
+      const { CliSkillExecutor } = await import('../../../src/skills/cli-skill-executor.js');
+      const executor = new CliSkillExecutor(ralph as any, git as any, observer, undefined, commitMessageFn);
+      await executor.execute('cli:01_types', makeSkillInput(), makeCliConfig());
+
+      // Should still merge, just without a message
+      expect(git.merge).toHaveBeenCalledWith('01_types');
     });
   });
 

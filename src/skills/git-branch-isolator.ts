@@ -91,6 +91,12 @@ export class GitBranchIsolator {
     return this.git('rev-parse HEAD');
   }
 
+  getDiffStat(chunkId: string): string {
+    assertSafeId(chunkId);
+    const branch = this.branchName(chunkId);
+    return this.git(`diff --stat ${this.config.baseBranch}..${branch}`);
+  }
+
   getStatus(): string {
     return this.git('status --porcelain');
   }

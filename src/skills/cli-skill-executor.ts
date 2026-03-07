@@ -84,17 +84,21 @@ export class BudgetExceededError extends Error {
 
 // ── CliSkillExecutor ──
 
+type CommitMessageFn = (diffStat: string, objective: string) => Promise<string | null>;
+
 export class CliSkillExecutor {
   private readonly ralph: RalphLoop;
   private readonly git: GitBranchIsolator;
   private readonly observer: ObserverDeps;
   private readonly verifyCommand?: string | undefined;
+  private readonly commitMessageFn?: CommitMessageFn;
 
-  constructor(ralph: RalphLoop, git: GitBranchIsolator, observer: ObserverDeps, verifyCommand?: string) {
+  constructor(ralph: RalphLoop, git: GitBranchIsolator, observer: ObserverDeps, verifyCommand?: string, commitMessageFn?: CommitMessageFn) {
     this.ralph = ralph;
     this.git = git;
     this.observer = observer;
     this.verifyCommand = verifyCommand;
+    this.commitMessageFn = commitMessageFn;
   }
 
   async recoverDirtyFiles(
@@ -230,10 +234,24 @@ export class CliSkillExecutor {
       );
     }
 
+    // Generate commit message for squash merge (if available)
+    let commitMessage: string | undefined;
+    if (this.commitMessageFn) {
+      try {
+        const diffStat = this.git.getDiffStat(chunkId);
+        const msg = await this.commitMessageFn(diffStat, _input.objective);
+        if (msg) commitMessage = msg;
+      } catch {
+        // Silently fall back to no message — never block the pipeline
+      }
+    }
+
     // Git merge
     let mergeResult: { merged: boolean; commits: number };
     try {
-      mergeResult = this.git.merge(chunkId);
+      mergeResult = commitMessage
+        ? this.git.merge(chunkId, commitMessage)
+        : this.git.merge(chunkId);
     } catch (err) {
       // Merge failed (conflict) — still return SkillResult with output
       this.observer.setMetadata(chunkSpan, {
