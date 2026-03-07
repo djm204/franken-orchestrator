@@ -161,6 +161,75 @@ describe('PrCreator', () => {
     expect(logger.error).toHaveBeenCalled();
   });
 
+  describe('generatePrDescription()', () => {
+    it('generates PR title and body from LLM when client is provided', async () => {
+      const llmResponse = [
+        'TITLE: feat(orchestrator): add CLI execution pipeline',
+        'BODY:',
+        '## Summary',
+        '- Added CLI skill executor with RALPH loop integration',
+        '- Implemented git branch isolation per chunk',
+        '',
+        '## Changes',
+        '- `src/skills/cli-skill-executor.ts` — main executor',
+      ].join('\n');
+      const llm = { complete: vi.fn().mockResolvedValue(llmResponse) };
+      const exec = vi.fn(() => '');
+      const creator = new PrCreator({ targetBranch: 'main', disabled: false, remote: 'origin' }, exec, llm);
+
+      const result = await creator.generatePrDescription(
+        'abc123 feat: first\ndef456 feat: second',
+        'file1.ts | 10 +++\nfile2.ts | 5 ---',
+        baseResult,
+      );
+
+      expect(result).not.toBeNull();
+      expect(result!.title).toBe('feat(orchestrator): add CLI execution pipeline');
+      expect(result!.body).toContain('## Summary');
+      expect(llm.complete).toHaveBeenCalledWith(expect.stringContaining('proj-123'));
+    });
+
+    it('falls back to null when LLM is not provided', async () => {
+      const exec = vi.fn(() => '');
+      const creator = new PrCreator({ targetBranch: 'main', disabled: false, remote: 'origin' }, exec);
+
+      const result = await creator.generatePrDescription('commits', 'diff', baseResult);
+
+      expect(result).toBeNull();
+    });
+
+    it('falls back to null when LLM call fails', async () => {
+      const llm = { complete: vi.fn().mockRejectedValue(new Error('timeout')) };
+      const exec = vi.fn(() => '');
+      const creator = new PrCreator({ targetBranch: 'main', disabled: false, remote: 'origin' }, exec, llm);
+
+      const result = await creator.generatePrDescription('commits', 'diff', baseResult);
+
+      expect(result).toBeNull();
+    });
+
+    it('falls back to null when LLM returns malformed response', async () => {
+      const llm = { complete: vi.fn().mockResolvedValue('just some random text without TITLE/BODY markers') };
+      const exec = vi.fn(() => '');
+      const creator = new PrCreator({ targetBranch: 'main', disabled: false, remote: 'origin' }, exec, llm);
+
+      const result = await creator.generatePrDescription('commits', 'diff', baseResult);
+
+      expect(result).toBeNull();
+    });
+
+    it('truncates title to 70 chars', async () => {
+      const longTitle = 'feat(orchestrator): ' + 'a'.repeat(100);
+      const llm = { complete: vi.fn().mockResolvedValue(`TITLE: ${longTitle}\nBODY:\nsome body`) };
+      const exec = vi.fn(() => '');
+      const creator = new PrCreator({ targetBranch: 'main', disabled: false, remote: 'origin' }, exec, llm);
+
+      const result = await creator.generatePrDescription('commits', 'diff', baseResult);
+
+      expect(result!.title.length).toBeLessThanOrEqual(70);
+    });
+  });
+
   describe('generateCommitMessage()', () => {
     it('generates a commit message from LLM when client is provided', async () => {
       const llm = { complete: vi.fn().mockResolvedValue('feat(auth): add JWT validation') };

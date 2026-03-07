@@ -16,7 +16,7 @@ const defaultExec: ExecFn = (cmd: string) => execSync(cmd, { encoding: 'utf-8', 
 export class PrCreator {
   private readonly config: PrCreatorConfig;
   private readonly exec: ExecFn;
-  private readonly llm?: ILlmClient;
+  private readonly llm?: ILlmClient | undefined;
 
   constructor(config: PrCreatorConfig, exec: ExecFn = defaultExec, llm?: ILlmClient) {
     this.config = {
@@ -45,6 +45,40 @@ export class PrCreator {
 
       const raw = await this.llm.complete(prompt);
       return cleanCommitMessage(raw);
+    } catch {
+      return null;
+    }
+  }
+
+  async generatePrDescription(
+    commitLog: string,
+    diffStat: string,
+    result: BeastResult,
+  ): Promise<{ title: string; body: string } | null> {
+    if (!this.llm) return null;
+    try {
+      const prompt = [
+        'Write a GitHub PR title and body for these changes.',
+        'Title: max 70 chars, semver-compatible conventional commit style (e.g. feat(module): description).',
+        'Body: markdown with ## Summary (2-4 bullets) and ## Changes (key files).',
+        '',
+        'Commits:',
+        commitLog,
+        '',
+        'Files changed:',
+        diffStat,
+        '',
+        `Project: ${result.projectId}`,
+        `Chunks completed: ${result.taskResults?.length ?? 0}`,
+        '',
+        'Respond in this exact format:',
+        'TITLE: <title here>',
+        'BODY:',
+        '<body here>',
+      ].join('\n');
+
+      const raw = await this.llm.complete(prompt);
+      return parsePrDescription(raw);
     } catch {
       return null;
     }
@@ -200,6 +234,19 @@ function isGhMissing(error: unknown): boolean {
 function stringifyError(error: unknown): string {
   if (error instanceof Error) return error.message;
   return String(error);
+}
+
+function parsePrDescription(raw: string): { title: string; body: string } | null {
+  const titleMatch = raw.match(/^TITLE:\s*(.+)$/m);
+  const bodyMatch = raw.match(/^BODY:\s*\n?([\s\S]+)$/m);
+  if (!titleMatch || !bodyMatch) return null;
+
+  let title = titleMatch[1]!.trim();
+  if (title.length > 70) title = title.slice(0, 70);
+  const body = bodyMatch[1]!.trim();
+  if (!body) return null;
+
+  return { title, body };
 }
 
 function cleanCommitMessage(raw: string): string {
