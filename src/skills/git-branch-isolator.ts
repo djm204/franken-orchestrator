@@ -52,7 +52,7 @@ export class GitBranchIsolator {
     }
   }
 
-  merge(chunkId: string): { merged: boolean; commits: number } {
+  merge(chunkId: string, commitMessage?: string): { merged: boolean; commits: number } {
     assertSafeId(chunkId);
     const branch = this.branchName(chunkId);
     const count = parseInt(
@@ -66,7 +66,13 @@ export class GitBranchIsolator {
 
     this.git(`checkout ${this.config.baseBranch}`);
     try {
-      this.git(`merge ${branch} --no-edit`);
+      if (commitMessage) {
+        const safeMsg = commitMessage.replace(/"/g, '\\"');
+        this.git(`merge --squash ${branch}`);
+        this.git(`commit -m "${safeMsg}"`);
+      } else {
+        this.git(`merge ${branch} --no-edit`);
+      }
       return { merged: true, commits: count };
     } catch {
       this.git('merge --abort');

@@ -154,6 +154,73 @@ describe('GitBranchIsolator', () => {
         expect.objectContaining({ cwd: '/fake/repo' }),
       );
     });
+
+    it('uses squash merge when commitMessage is provided', () => {
+      mockExecSync.mockImplementation((cmd: string) => {
+        if (cmd === 'git rev-list --count main..chunk/03_my_chunk') return '3\n';
+        return '';
+      });
+
+      const result = isolator.merge('03_my_chunk', 'feat(types): add shared type definitions');
+
+      expect(result).toEqual({ merged: true, commits: 3 });
+      expect(mockExecSync).toHaveBeenCalledWith(
+        'git merge --squash chunk/03_my_chunk',
+        expect.objectContaining({ cwd: '/fake/repo' }),
+      );
+      expect(mockExecSync).toHaveBeenCalledWith(
+        'git commit -m "feat(types): add shared type definitions"',
+        expect.objectContaining({ cwd: '/fake/repo' }),
+      );
+    });
+
+    it('falls back to regular merge when no commitMessage provided', () => {
+      mockExecSync.mockImplementation((cmd: string) => {
+        if (cmd === 'git rev-list --count main..chunk/03_my_chunk') return '3\n';
+        return '';
+      });
+
+      const result = isolator.merge('03_my_chunk');
+
+      expect(result).toEqual({ merged: true, commits: 3 });
+      expect(mockExecSync).toHaveBeenCalledWith(
+        'git merge chunk/03_my_chunk --no-edit',
+        expect.objectContaining({ cwd: '/fake/repo' }),
+      );
+    });
+
+    it('aborts squash merge on conflict and returns merged: false', () => {
+      mockExecSync.mockImplementation((cmd: string) => {
+        if (cmd === 'git rev-list --count main..chunk/03_my_chunk') return '2\n';
+        if (cmd === 'git checkout main') return '';
+        if (cmd === 'git merge --squash chunk/03_my_chunk') {
+          throw new Error('CONFLICT');
+        }
+        return '';
+      });
+
+      const result = isolator.merge('03_my_chunk', 'feat(types): add types');
+
+      expect(result).toEqual({ merged: false, commits: 2 });
+      expect(mockExecSync).toHaveBeenCalledWith(
+        'git merge --abort',
+        expect.objectContaining({ cwd: '/fake/repo' }),
+      );
+    });
+
+    it('sanitizes commitMessage to prevent shell injection', () => {
+      mockExecSync.mockImplementation((cmd: string) => {
+        if (cmd.startsWith('git rev-list')) return '1\n';
+        return '';
+      });
+
+      isolator.merge('03_my_chunk', 'feat(types): add "shared" types');
+
+      expect(mockExecSync).toHaveBeenCalledWith(
+        expect.stringContaining('feat(types): add \\"shared\\" types'),
+        expect.objectContaining({ cwd: '/fake/repo' }),
+      );
+    });
   });
 
   describe('hasMeaningfulChange()', () => {
