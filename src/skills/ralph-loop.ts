@@ -118,9 +118,8 @@ function buildClaudeArgs(prompt: string, maxTurns: number): string[] {
     '--verbose',
     '--disable-slash-commands',
     '--no-session-persistence',
-    '--plugin-dir', '/dev/null',
-    prompt,
     '--max-turns', String(maxTurns),
+    '--', prompt,
   ];
 }
 

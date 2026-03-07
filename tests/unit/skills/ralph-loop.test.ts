@@ -177,8 +177,9 @@ describe('RalphLoop', () => {
         '--output-format', 'stream-json',
         '--verbose',
         '--disable-slash-commands',
-        'Implement feature X',
+        '--no-session-persistence',
         '--max-turns', '10',
+        '--', 'Implement feature X',
       ],
       expect.objectContaining({
         stdio: ['ignore', 'pipe', 'pipe'],
