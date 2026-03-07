@@ -7,3 +7,4 @@ export * from './observer-adapter.js';
 export * from './critique-adapter.js';
 export * from './governor-adapter.js';
 export * from './heartbeat-adapter.js';
+export * from './cli-llm-adapter.js';

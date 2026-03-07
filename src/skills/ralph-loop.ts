@@ -140,7 +140,7 @@ function tryExtractTextFromNode(node: unknown, out: string[]): void {
   }
 
   const obj = node as Record<string, unknown>;
-  const directKeys = ['text', 'output_text', 'delta', 'output', 'message'];
+  const directKeys = ['text', 'output_text', 'output', 'message'];
   for (const key of directKeys) {
     const value = obj[key];
     if (typeof value === 'string' && value.trim().length > 0) {
@@ -148,7 +148,7 @@ function tryExtractTextFromNode(node: unknown, out: string[]): void {
     }
   }
 
-  const nestedKeys = ['content', 'parts', 'data', 'result', 'response'];
+  const nestedKeys = ['delta', 'content', 'parts', 'data', 'result', 'response'];
   for (const key of nestedKeys) {
     if (obj[key] !== undefined) {
       tryExtractTextFromNode(obj[key], out);
@@ -235,6 +235,12 @@ function spawnIteration(
           if (!trimmed) continue;
           try {
             const obj = JSON.parse(trimmed) as Record<string, unknown>;
+            // Check for thinking content (extended thinking / reasoning)
+            const delta = obj.delta as Record<string, unknown> | undefined;
+            if (delta?.thinking && typeof delta.thinking === 'string') {
+              process.stdout.write(`\x1b[2m${delta.thinking}\x1b[0m`);
+              continue;
+            }
             const parts: string[] = [];
             tryExtractTextFromNode(obj, parts);
             if (parts.length > 0) process.stdout.write(parts.join(''));
