@@ -58,6 +58,23 @@ vi.mock('../../../src/cli/session.js', () => ({
 
 vi.mock('../../../src/logging/beast-logger.js', () => ({
   BANNER: '[BANNER]',
+  BeastLogger: vi.fn(function (this: Record<string, unknown>) {
+    this.info = vi.fn();
+    this.warn = vi.fn();
+    this.error = vi.fn();
+    this.debug = vi.fn();
+  }),
+}));
+
+vi.mock('../../../src/cli/config-loader.js', () => ({
+  loadConfig: vi.fn(async () => ({
+    maxCritiqueIterations: 3,
+    maxDurationMs: 600_000,
+    enableTracing: false,
+    enableHeartbeat: false,
+    minCritiqueScore: 0.7,
+    maxTotalTokens: 100_000,
+  })),
 }));
 
 // Mock readline to prevent stdin hanging

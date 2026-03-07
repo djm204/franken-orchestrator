@@ -212,7 +212,7 @@ describe('createCliDeps — cliLlmAdapter field', () => {
     const paths = getProjectPaths(testDir);
     scaffoldFrankenbeast(paths);
 
-    const result = realCreateCliDeps({
+    const result = await realCreateCliDeps({
       paths,
       baseBranch: 'main',
       budget: 5,

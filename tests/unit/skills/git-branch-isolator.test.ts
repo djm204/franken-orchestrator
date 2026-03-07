@@ -6,7 +6,7 @@ vi.mock('node:child_process', () => ({
 }));
 
 import { execSync } from 'node:child_process';
-import { GitBranchIsolator } from '../../../src/skills/git-branch-isolator.js';
+import { GitBranchIsolator, parseDirtySubmodules } from '../../../src/skills/git-branch-isolator.js';
 
 const mockExecSync = execSync as unknown as ReturnType<typeof vi.fn>;
 
@@ -295,5 +295,112 @@ describe('GitBranchIsolator', () => {
       expect(() => isolator.autoCommit('chunk$(evil)', 'impl', 1)).toThrow();
       expect(() => isolator.merge('chunk`whoami`')).toThrow();
     });
+  });
+
+  describe('autoCommit() submodule awareness', () => {
+    it('commits inside dirty submodules before root commit', () => {
+      const calls: Array<{ cmd: string; cwd: string }> = [];
+      mockExecSync.mockImplementation((cmd: string, opts?: Record<string, unknown>) => {
+        const cwd = (opts?.cwd as string) ?? '?';
+        calls.push({ cmd, cwd });
+        if (cmd === 'git status --porcelain') return ' m franken-orchestrator\n';
+        return '';
+      });
+
+      isolator.autoCommit('03_my_chunk', 'impl', 1);
+
+      // Should have committed inside the submodule first
+      const subAdd = calls.find(c => c.cmd === 'git add -A' && c.cwd.includes('franken-orchestrator'));
+      const subCommit = calls.find(c => c.cmd.startsWith('git commit') && c.cwd.includes('franken-orchestrator'));
+      expect(subAdd).toBeDefined();
+      expect(subCommit).toBeDefined();
+
+      // Then root repo commit
+      const rootAdd = calls.find(c => c.cmd === 'git add -A' && c.cwd === '/fake/repo');
+      const rootCommit = calls.find(c => c.cmd.startsWith('git commit -m') && c.cwd === '/fake/repo');
+      expect(rootAdd).toBeDefined();
+      expect(rootCommit).toBeDefined();
+
+      // Submodule commits happen before root commits
+      const subAddIdx = calls.indexOf(subAdd!);
+      const rootAddIdx = calls.indexOf(rootAdd!);
+      expect(subAddIdx).toBeLessThan(rootAddIdx);
+    });
+
+    it('handles multiple dirty submodules', () => {
+      const subCwds: string[] = [];
+      mockExecSync.mockImplementation((cmd: string, opts?: Record<string, unknown>) => {
+        const cwd = (opts?.cwd as string) ?? '';
+        if (cmd === 'git add -A' && cwd !== '/fake/repo') {
+          subCwds.push(cwd);
+        }
+        if (cmd === 'git status --porcelain') {
+          return ' m franken-orchestrator\n m franken-types\n';
+        }
+        return '';
+      });
+
+      isolator.autoCommit('03_my_chunk', 'impl', 1);
+
+      expect(subCwds).toContain('/fake/repo/franken-orchestrator');
+      expect(subCwds).toContain('/fake/repo/franken-types');
+    });
+
+    it('skips submodule commit when submodule has nothing to commit', () => {
+      mockExecSync.mockImplementation((cmd: string, opts?: { cwd?: string }) => {
+        if (cmd === 'git status --porcelain') return ' m franken-orchestrator\n';
+        if (cmd.startsWith('git commit') && opts?.cwd?.includes('franken-orchestrator')) {
+          throw new Error('nothing to commit');
+        }
+        return '';
+      });
+
+      // Should not throw — submodule failure is caught
+      const result = isolator.autoCommit('03_my_chunk', 'impl', 1);
+      expect(result).toBe(true);
+    });
+
+    it('does not attempt submodule commits when status has no submodule lines', () => {
+      const calls: string[] = [];
+      mockExecSync.mockImplementation((cmd: string, opts?: { cwd?: string }) => {
+        calls.push(`${cmd} @ ${opts?.cwd ?? '?'}`);
+        if (cmd === 'git status --porcelain') return ' M src/foo.ts\n';
+        return '';
+      });
+
+      isolator.autoCommit('03_my_chunk', 'impl', 1);
+
+      // No calls to submodule directories
+      const subCalls = calls.filter(c => !c.endsWith('@ /fake/repo') && !c.endsWith('@ ?'));
+      expect(subCalls).toEqual([]);
+    });
+  });
+});
+
+describe('parseDirtySubmodules()', () => {
+  it('extracts submodule paths from porcelain output', () => {
+    const status = ' m franken-orchestrator\n M README.md\n?? new-file.ts\n';
+    expect(parseDirtySubmodules(status)).toEqual(['franken-orchestrator']);
+  });
+
+  it('returns empty array when no dirty submodules', () => {
+    expect(parseDirtySubmodules(' M src/foo.ts\n')).toEqual([]);
+    expect(parseDirtySubmodules('')).toEqual([]);
+  });
+
+  it('handles multiple dirty submodules', () => {
+    const status = ' m franken-orchestrator\n m franken-types\n M file.ts\n';
+    expect(parseDirtySubmodules(status)).toEqual(['franken-orchestrator', 'franken-types']);
+  });
+
+  it('handles trimmed output where first line loses leading space', () => {
+    // this.git() calls .trim() which strips the leading space from the first line
+    const trimmed = 'm franken-orchestrator\n m franken-types';
+    expect(parseDirtySubmodules(trimmed)).toEqual(['franken-orchestrator', 'franken-types']);
+  });
+
+  it('does not match regular modified files (capital M)', () => {
+    expect(parseDirtySubmodules('M  src/foo.ts\n')).toEqual([]);
+    expect(parseDirtySubmodules(' M src/foo.ts\n')).toEqual([]);
   });
 });

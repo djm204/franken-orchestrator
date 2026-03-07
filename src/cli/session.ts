@@ -77,7 +77,7 @@ export class Session {
 
   private async runInterview(): Promise<void> {
     const { paths, io } = this.config;
-    const { cliLlmAdapter } = createCliDeps(this.buildDepOptions());
+    const { cliLlmAdapter } = await createCliDeps(this.buildDepOptions());
 
     // Create LLM client from CLI LLM adapter
     const adapterLlm = new AdapterLlmClient(cliLlmAdapter);
@@ -119,7 +119,7 @@ export class Session {
 
   private async runPlan(): Promise<void> {
     const { paths, io, designDocPath } = this.config;
-    const { cliLlmAdapter, logger } = createCliDeps(this.buildDepOptions());
+    const { cliLlmAdapter, logger } = await createCliDeps(this.buildDepOptions());
 
     // Load design doc
     let designContent: string;
@@ -167,7 +167,7 @@ export class Session {
     const { paths, planDirOverride, budget } = this.config;
     const chunkDir = planDirOverride ?? paths.plansDir;
 
-    const { deps, logger, finalize } = createCliDeps(this.buildDepOptions());
+    const { deps, logger, finalize } = await createCliDeps(this.buildDepOptions());
 
     const graphBuilder = new ChunkFileGraphBuilder(chunkDir);
     const refreshPlanTasks = async () => {

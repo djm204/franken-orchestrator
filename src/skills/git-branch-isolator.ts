@@ -37,6 +37,20 @@ function isExpendable(filePath: string): boolean {
   return parts.some(part => EXPENDABLE_DIRS.includes(part));
 }
 
+/**
+ * Parse `git status --porcelain` output and return submodule paths that have
+ * modified content. Porcelain format for dirty submodules:
+ *   " m franken-orchestrator"  (space + m = modified content in submodule)
+ * Note: the leading space may be stripped if the output was trimmed (e.g. by
+ * execSync().trim()), so we also match "m " at the start of a line.
+ */
+export function parseDirtySubmodules(porcelain: string): string[] {
+  return porcelain
+    .split('\n')
+    .filter(line => /^ ?m /.test(line))
+    .map(line => line.replace(/^ ?m /, '').trim());
+}
+
 export class GitBranchIsolator {
   private readonly config: GitIsolationConfig;
 
@@ -97,11 +111,37 @@ export class GitBranchIsolator {
     const status = this.git('status --porcelain');
     if (status.length === 0) return false;
     try {
+      const msg = `auto: ${stage} ${chunkId} iter ${iteration}`;
+      this.commitDirtySubmodules(status, msg);
       this.git('add -A');
-      this.git(`commit -m "auto: ${stage} ${chunkId} iter ${iteration}"`);
+      this.git(`commit -m "${msg}"`);
       return true;
     } catch {
       return false;
+    }
+  }
+
+  /**
+   * Detect submodules with dirty content and commit inside them before
+   * the root repo commit. Without this, `git add -A` from the root only
+   * stages the gitlink pointer update, orphaning the actual file changes
+   * inside the submodule's working directory.
+   */
+  private commitDirtySubmodules(porcelainStatus: string, message: string): void {
+    const dirtySubmodules = parseDirtySubmodules(porcelainStatus);
+    for (const sub of dirtySubmodules) {
+      try {
+        execSync(`git add -A`, {
+          encoding: 'utf-8',
+          cwd: resolve(this.config.workingDir, sub),
+        });
+        execSync(`git commit -m "${message.replace(/"/g, '\\"')}"`, {
+          encoding: 'utf-8',
+          cwd: resolve(this.config.workingDir, sub),
+        });
+      } catch {
+        // Submodule commit failed (nothing to commit, etc.) — continue
+      }
     }
   }
 

@@ -7,6 +7,9 @@ import { CliLlmAdapter } from '../adapters/cli-llm-adapter.js';
 import { CliObserverBridge } from '../adapters/cli-observer-bridge.js';
 import { FileCheckpointStore } from '../checkpoint/file-checkpoint-store.js';
 import { PrCreator } from '../closure/pr-creator.js';
+import { AdapterLlmClient } from '../adapters/adapter-llm-client.js';
+import { setupTraceViewer } from './trace-viewer.js';
+import type { TraceViewerHandle } from './trace-viewer.js';
 import type {
   BeastLoopDeps, IFirewallModule, ISkillsModule, IMemoryModule,
   IPlannerModule, ICritiqueModule, IGovernorModule,
@@ -74,7 +77,7 @@ function createStubSkills(planDir: string): ISkillsModule {
   };
 }
 
-export function createCliDeps(options: CliDepOptions): CliDeps {
+export async function createCliDeps(options: CliDepOptions): Promise<CliDeps> {
   const { paths, baseBranch, budget, verbose, noPr, reset } = options;
 
   // Reset if requested
@@ -90,6 +93,12 @@ export function createCliDeps(options: CliDepOptions): CliDeps {
   const observerBridge = new CliObserverBridge({ budgetLimitUsd: budget });
   observerBridge.startTrace(`cli-session-${Date.now()}`);
 
+  // Trace viewer (verbose mode only)
+  let traceViewerHandle: TraceViewerHandle | null = null;
+  if (verbose) {
+    traceViewerHandle = await setupTraceViewer(paths.tracesDb, logger);
+  }
+
   // CLI execution stack
   const checkpoint = new FileCheckpointStore(paths.checkpointFile);
   const ralph = new RalphLoop();
@@ -104,19 +113,33 @@ export function createCliDeps(options: CliDepOptions): CliDeps {
     workingDir: paths.root,
   });
 
-  const cliExecutor = new CliSkillExecutor(
-    ralph, gitIso, observerBridge.observerDeps,
-    undefined, undefined, logger,
+  const adapterLlm = new AdapterLlmClient(cliLlmAdapter);
+
+  // PR creator (wrap adapter as ILlmClient for LLM-powered titles/descriptions)
+  const prCreator = noPr ? undefined : new PrCreator(
+    { targetBranch: 'main', disabled: false, remote: 'origin' },
+    undefined,
+    adapterLlm,
   );
 
-  // PR creator
-  const prCreator = noPr ? undefined : new PrCreator({
-    targetBranch: 'main',
-    disabled: false,
-    remote: 'origin',
-  });
+  // Commit message generator — delegates to PrCreator's LLM prompt
+  const commitMessageFn = prCreator
+    ? (diffStat: string, objective: string) => prCreator.generateCommitMessage(diffStat, objective)
+    : undefined;
+
+  // Recovery verify command — typecheck as a fast sanity check that
+  // dirty files from a crashed run don't break the build
+  const verifyCommand = 'npx tsc --noEmit';
+
+  const cliExecutor = new CliSkillExecutor(
+    ralph, gitIso, observerBridge.observerDeps,
+    verifyCommand, commitMessageFn, logger,
+  );
 
   const finalize = async () => {
+    if (traceViewerHandle) {
+      await traceViewerHandle.stop();
+    }
     for (const e of logger.getLogEntries()) {
       appendFileSync(paths.logFile, e + '\n');
     }
