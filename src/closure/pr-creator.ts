@@ -1,4 +1,5 @@
 import { execSync } from 'node:child_process';
+import type { ILlmClient } from '@franken/types';
 import type { BeastResult, TaskOutcome } from '../types.js';
 import type { ILogger } from '../deps.js';
 
@@ -15,14 +16,38 @@ const defaultExec: ExecFn = (cmd: string) => execSync(cmd, { encoding: 'utf-8', 
 export class PrCreator {
   private readonly config: PrCreatorConfig;
   private readonly exec: ExecFn;
+  private readonly llm?: ILlmClient;
 
-  constructor(config: PrCreatorConfig, exec: ExecFn = defaultExec) {
+  constructor(config: PrCreatorConfig, exec: ExecFn = defaultExec, llm?: ILlmClient) {
     this.config = {
       targetBranch: config.targetBranch ?? 'main',
       disabled: config.disabled ?? false,
       remote: config.remote ?? 'origin',
     };
     this.exec = exec;
+    this.llm = llm;
+  }
+
+  async generateCommitMessage(diffStat: string, chunkObjective: string): Promise<string | null> {
+    if (!this.llm) return null;
+    try {
+      const prompt = [
+        'Write a semver-compatible conventional commit message for this change.',
+        'Format: type(scope): description',
+        'Types: feat, fix, chore, refactor, docs, test, ci, perf',
+        'One line, max 72 chars. No markdown, no backticks.',
+        'The type determines semver bump: feat = minor, fix = patch, BREAKING CHANGE footer = major.',
+        '',
+        `Chunk objective: ${chunkObjective}`,
+        'Files changed:',
+        diffStat,
+      ].join('\n');
+
+      const raw = await this.llm.complete(prompt);
+      return cleanCommitMessage(raw);
+    } catch {
+      return null;
+    }
   }
 
   async create(result: BeastResult, logger?: ILogger): Promise<{ url: string } | null> {
@@ -175,4 +200,14 @@ function isGhMissing(error: unknown): boolean {
 function stringifyError(error: unknown): string {
   if (error instanceof Error) return error.message;
   return String(error);
+}
+
+function cleanCommitMessage(raw: string): string {
+  let msg = raw.trim();
+  // Strip markdown code fences
+  msg = msg.replace(/^```[\s\S]*?\n?/, '').replace(/\n?```\s*$/, '').trim();
+  // Take first non-empty line only
+  const firstLine = msg.split('\n').find(l => l.trim().length > 0) ?? msg;
+  // Truncate to 72 chars
+  return firstLine.length > 72 ? firstLine.slice(0, 72) : firstLine;
 }

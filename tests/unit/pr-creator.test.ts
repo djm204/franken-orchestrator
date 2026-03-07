@@ -161,6 +161,60 @@ describe('PrCreator', () => {
     expect(logger.error).toHaveBeenCalled();
   });
 
+  describe('generateCommitMessage()', () => {
+    it('generates a commit message from LLM when client is provided', async () => {
+      const llm = { complete: vi.fn().mockResolvedValue('feat(auth): add JWT validation') };
+      const exec = vi.fn(() => '');
+      const creator = new PrCreator({ targetBranch: 'main', disabled: false, remote: 'origin' }, exec, llm);
+
+      const msg = await creator.generateCommitMessage('src/auth.ts | 42 +++ 3 ---', 'Add JWT authentication');
+
+      expect(msg).toBe('feat(auth): add JWT validation');
+      expect(llm.complete).toHaveBeenCalledWith(expect.stringContaining('Add JWT authentication'));
+      expect(llm.complete).toHaveBeenCalledWith(expect.stringContaining('src/auth.ts'));
+    });
+
+    it('falls back to null when LLM is not provided', async () => {
+      const exec = vi.fn(() => '');
+      const creator = new PrCreator({ targetBranch: 'main', disabled: false, remote: 'origin' }, exec);
+
+      const msg = await creator.generateCommitMessage('src/auth.ts | 5 +++', 'Add auth');
+
+      expect(msg).toBeNull();
+    });
+
+    it('falls back to null when LLM call fails', async () => {
+      const llm = { complete: vi.fn().mockRejectedValue(new Error('rate limited')) };
+      const exec = vi.fn(() => '');
+      const creator = new PrCreator({ targetBranch: 'main', disabled: false, remote: 'origin' }, exec, llm);
+
+      const msg = await creator.generateCommitMessage('src/auth.ts | 5 +++', 'Add auth');
+
+      expect(msg).toBeNull();
+    });
+
+    it('trims and strips backticks from LLM response', async () => {
+      const llm = { complete: vi.fn().mockResolvedValue('```\nfeat(auth): add JWT\n```\n') };
+      const exec = vi.fn(() => '');
+      const creator = new PrCreator({ targetBranch: 'main', disabled: false, remote: 'origin' }, exec, llm);
+
+      const msg = await creator.generateCommitMessage('diff stat', 'objective');
+
+      expect(msg).toBe('feat(auth): add JWT');
+    });
+
+    it('truncates messages longer than 72 chars', async () => {
+      const longMsg = 'feat(auth): ' + 'a'.repeat(100);
+      const llm = { complete: vi.fn().mockResolvedValue(longMsg) };
+      const exec = vi.fn(() => '');
+      const creator = new PrCreator({ targetBranch: 'main', disabled: false, remote: 'origin' }, exec, llm);
+
+      const msg = await creator.generateCommitMessage('diff stat', 'objective');
+
+      expect(msg!.length).toBeLessThanOrEqual(72);
+    });
+  });
+
   it('uses iteration count from output when provided', async () => {
     const exec = vi.fn((cmd: string) => {
       if (cmd.startsWith('git branch --show-current')) return 'feature/branch\n';
