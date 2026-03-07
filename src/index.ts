@@ -121,3 +121,7 @@ export type { ProjectPaths } from './cli/project-root.js';
 
 // CLI — file writer
 export { writeDesignDoc, readDesignDoc } from './cli/file-writer.js';
+
+// CLI — session orchestrator
+export { Session } from './cli/session.js';
+export type { SessionPhase, SessionConfig } from './cli/session.js';
