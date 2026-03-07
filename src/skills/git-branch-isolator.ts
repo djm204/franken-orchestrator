@@ -1,12 +1,40 @@
 import { execSync } from 'node:child_process';
+import { unlinkSync } from 'node:fs';
+import { resolve } from 'node:path';
 import type { GitIsolationConfig } from './cli-types.js';
 
 const SAFE_ID = /^[a-zA-Z0-9_\-./]+$/;
+
+// Directories whose contents are always regenerable build artifacts.
+// Files here can be safely removed to unblock a git checkout.
+const EXPENDABLE_DIRS = ['.build'];
 
 function assertSafeId(id: string): void {
   if (!SAFE_ID.test(id)) {
     throw new Error(`Unsafe chunkId: "${id}"`);
   }
+}
+
+/**
+ * Parse git checkout error to extract conflicting file paths.
+ * Git outputs lines like:
+ *   "error: The following untracked working tree files would be overwritten by checkout:"
+ *   "\tpath/to/file"
+ */
+function parseConflictingFiles(stderr: string): string[] {
+  const lines = stderr.split('\n');
+  return lines
+    .map(l => l.trim())
+    .filter(l => l.startsWith('\t') || (l.length > 0 && !l.startsWith('error:') && !l.startsWith('Please ') && !l.startsWith('Aborting') && !l.startsWith('hint:')))
+    .map(l => l.replace(/^\t/, ''));
+}
+
+/**
+ * Check if a file path is inside an expendable directory.
+ */
+function isExpendable(filePath: string): boolean {
+  const parts = filePath.split('/');
+  return parts.some(part => EXPENDABLE_DIRS.includes(part));
 }
 
 export class GitBranchIsolator {
@@ -27,22 +55,37 @@ export class GitBranchIsolator {
     return `${this.config.branchPrefix}${chunkId}`;
   }
 
+  /**
+   * Safe checkout: try normal checkout first. On failure, parse the error
+   * to identify conflicting files. If ALL are expendable (.build/ artifacts),
+   * remove them and retry. If any real file conflicts, re-throw.
+   */
+  private safeCheckout(target: string): void {
+    try {
+      this.git(`checkout ${target}`);
+    } catch (err: unknown) {
+      const stderr = (err as { stderr?: string }).stderr ?? String(err);
+      const conflicts = parseConflictingFiles(stderr);
+
+      if (conflicts.length === 0 || !conflicts.every(isExpendable)) {
+        throw err; // Real conflict — don't swallow it
+      }
+
+      // All conflicting files are expendable — remove and retry
+      for (const file of conflicts) {
+        try { unlinkSync(resolve(this.config.workingDir, file)); } catch { /* already gone */ }
+      }
+      this.git(`checkout ${target}`);
+    }
+  }
+
   isolate(chunkId: string): void {
     assertSafeId(chunkId);
     const branch = this.branchName(chunkId);
-    try {
-      this.git(`checkout ${this.config.baseBranch}`);
-    } catch {
-      // Force checkout if untracked files conflict (e.g. .build/ artifacts)
-      this.git(`checkout --force ${this.config.baseBranch}`);
-    }
+    this.safeCheckout(this.config.baseBranch);
     const exists = this.git(`branch --list ${branch}`);
     if (exists.length > 0) {
-      try {
-        this.git(`checkout ${branch}`);
-      } catch {
-        this.git(`checkout --force ${branch}`);
-      }
+      this.safeCheckout(branch);
       return;
     }
     this.git(`checkout -b ${branch}`);
@@ -74,11 +117,7 @@ export class GitBranchIsolator {
       return { merged: false, commits: 0 };
     }
 
-    try {
-      this.git(`checkout ${this.config.baseBranch}`);
-    } catch {
-      this.git(`checkout --force ${this.config.baseBranch}`);
-    }
+    this.safeCheckout(this.config.baseBranch);
     try {
       if (commitMessage) {
         const safeMsg = commitMessage.replace(/"/g, '\\"');
