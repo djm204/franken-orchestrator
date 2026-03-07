@@ -306,4 +306,58 @@ describe('PrCreator', () => {
     const createCmd = exec.mock.calls.find(call => call[0].startsWith('gh pr create'))?.[0] ?? '';
     expect(createCmd).toContain('| chunk-01 | success | 3 |');
   });
+
+  it('uses LLM-generated title and body when ILlmClient is provided', async () => {
+    const llmResponse = [
+      'TITLE: feat(cli): implement RALPH loop execution pipeline',
+      'BODY:',
+      '## Summary',
+      '- Integrated CLI skill executor',
+      '',
+      '## Changes',
+      '- `src/skills/cli-skill-executor.ts`',
+    ].join('\n');
+    const llm = { complete: vi.fn().mockResolvedValue(llmResponse) };
+    const calls: string[] = [];
+    const exec = vi.fn((cmd: string) => {
+      calls.push(cmd);
+      if (cmd.startsWith('git branch --show-current')) return 'feature/branch\n';
+      if (cmd.startsWith('git push')) return '';
+      if (cmd.startsWith('gh pr list')) return '[]';
+      if (cmd.startsWith('git log')) return 'abc123 feat: first\ndef456 feat: second\n';
+      if (cmd.startsWith('git diff --stat')) return 'file1.ts | 10 +++\n';
+      if (cmd.startsWith('gh pr create')) return 'https://example.com/pr/5\n';
+      return '';
+    });
+
+    const creator = new PrCreator({ targetBranch: 'main', disabled: false, remote: 'origin' }, exec, llm);
+    const result = await creator.create(baseResult, makeLogger());
+
+    expect(result?.url).toBe('https://example.com/pr/5');
+    const createCmd = calls.find(c => c.startsWith('gh pr create')) ?? '';
+    expect(createCmd).toContain('feat(cli): implement RALPH loop execution pipeline');
+  });
+
+  it('falls back to static title/body when LLM generation fails', async () => {
+    const llm = { complete: vi.fn().mockRejectedValue(new Error('rate limited')) };
+    const calls: string[] = [];
+    const exec = vi.fn((cmd: string) => {
+      calls.push(cmd);
+      if (cmd.startsWith('git branch --show-current')) return 'feature/branch\n';
+      if (cmd.startsWith('git push')) return '';
+      if (cmd.startsWith('gh pr list')) return '[]';
+      if (cmd.startsWith('git log')) return 'abc123 feat: first\n';
+      if (cmd.startsWith('git diff --stat')) return 'file1.ts | 10 +++\n';
+      if (cmd.startsWith('gh pr create')) return 'https://example.com/pr/6\n';
+      return '';
+    });
+
+    const creator = new PrCreator({ targetBranch: 'main', disabled: false, remote: 'origin' }, exec, llm);
+    const result = await creator.create(baseResult, makeLogger());
+
+    expect(result?.url).toBe('https://example.com/pr/6');
+    const createCmd = calls.find(c => c.startsWith('gh pr create')) ?? '';
+    // Falls back to static buildTitle
+    expect(createCmd).toContain('feat: proj-123');
+  });
 });

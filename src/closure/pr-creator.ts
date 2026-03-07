@@ -120,8 +120,17 @@ export class PrCreator {
       return null;
     }
 
-    const title = buildTitle(result.projectId, outcomes.length);
-    const body = buildBody(result, outcomes);
+    let title: string;
+    let body: string;
+
+    const llmResult = await this.tryGeneratePrFromLlm(result, logger);
+    if (llmResult) {
+      title = llmResult.title;
+      body = llmResult.body;
+    } else {
+      title = buildTitle(result.projectId, outcomes.length);
+      body = buildBody(result, outcomes);
+    }
 
     try {
       const output = this.exec(
@@ -174,6 +183,26 @@ export class PrCreator {
         return null;
       }
       logger?.error('PrCreator: failed to list PRs', { error: stringifyError(error) });
+      return null;
+    }
+  }
+
+  private async tryGeneratePrFromLlm(
+    result: BeastResult,
+    logger?: ILogger,
+  ): Promise<{ title: string; body: string } | null> {
+    if (!this.llm) return null;
+    try {
+      const commitLog = this.safeExec(
+        `git log ${this.config.targetBranch}..HEAD --oneline`,
+        logger,
+      ) ?? '';
+      const diffStat = this.safeExec(
+        `git diff --stat ${this.config.targetBranch}..HEAD`,
+        logger,
+      ) ?? '';
+      return await this.generatePrDescription(commitLog, diffStat, result);
+    } catch {
       return null;
     }
   }
