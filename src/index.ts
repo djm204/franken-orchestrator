@@ -1,6 +1,12 @@
 // Beast Loop orchestrator
 export { BeastLoop } from './beast-loop.js';
 
+// CLI
+export type { CliArgs, Subcommand } from './cli/args.js';
+export { parseArgs, printUsage } from './cli/args.js';
+export type { ProjectPaths } from './cli/project-root.js';
+export { resolveProjectRoot, getProjectPaths, scaffoldFrankenbeast } from './cli/project-root.js';
+
 // Dependencies
 export type { BeastLoopDeps } from './deps.js';
 export type {

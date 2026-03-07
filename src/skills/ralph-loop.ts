@@ -117,6 +117,8 @@ function buildClaudeArgs(prompt: string, maxTurns: number): string[] {
     '--output-format', 'stream-json',
     '--verbose',
     '--disable-slash-commands',
+    '--no-session-persistence',
+    '--plugin-dir', '/dev/null',
     prompt,
     '--max-turns', String(maxTurns),
   ];
@@ -192,7 +194,14 @@ function spawnIteration(
 
     const env = { ...process.env };
     if (provider === 'claude') {
-      delete env['CLAUDECODE'];
+      // Remove ALL Claude-related env vars to prevent the spawned CLI from
+      // inheriting parent session state (e.g. CLAUDE_CODE_ENTRYPOINT=claude-vscode
+      // causes it to try connecting to VS Code and freeze).
+      for (const key of Object.keys(env)) {
+        if (key.startsWith('CLAUDE')) {
+          delete env[key];
+        }
+      }
     }
 
     const child = spawn(cmd, args, {
