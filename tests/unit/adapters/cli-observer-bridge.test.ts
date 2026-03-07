@@ -144,5 +144,108 @@ describe('CliObserverBridge', () => {
       expect(result.limitUsd).toBe(5.0);
       expect(result.spendUsd).toBe(1.0);
     });
+
+    it('recordTokenUsage delegates to counter.record()', () => {
+      const bridge = new CliObserverBridge(defaultConfig);
+      bridge.startTrace('session-1');
+      const deps = bridge.observerDeps;
+
+      const span = deps.startSpan(deps.trace, { name: 'record-span' });
+      deps.recordTokenUsage(
+        span,
+        { promptTokens: 200, completionTokens: 100, model: 'gpt-4o' },
+        deps.counter,
+      );
+      deps.endSpan(span);
+
+      const totals = deps.counter.grandTotal();
+      expect(totals.promptTokens).toBe(200);
+      expect(totals.completionTokens).toBe(100);
+      expect(totals.totalTokens).toBe(300);
+    });
+
+    it('startSpan creates a child span on the trace', () => {
+      const bridge = new CliObserverBridge(defaultConfig);
+      bridge.startTrace('session-1');
+      const deps = bridge.observerDeps;
+
+      const span = deps.startSpan(deps.trace, { name: 'child-span' });
+      expect(span).toBeDefined();
+      expect(span.id).toBeTypeOf('string');
+      expect(span.id.length).toBeGreaterThan(0);
+
+      deps.endSpan(span);
+    });
+  });
+
+  // ── Hardening ──
+
+  describe('hardening', () => {
+    it('getTokenSpend returns zeros when startTrace has not been called', async () => {
+      const bridge = new CliObserverBridge(defaultConfig);
+      const spend = await bridge.getTokenSpend('session-1');
+
+      expect(spend.inputTokens).toBe(0);
+      expect(spend.outputTokens).toBe(0);
+      expect(spend.totalTokens).toBe(0);
+      expect(spend.estimatedCostUsd).toBe(0);
+    });
+
+    it('startSpan throws when startTrace has not been called', () => {
+      const bridge = new CliObserverBridge(defaultConfig);
+      expect(() => bridge.startSpan('my-span')).toThrow('No active trace');
+    });
+
+    it('observerDeps throws when startTrace has not been called', () => {
+      const bridge = new CliObserverBridge(defaultConfig);
+      expect(() => bridge.observerDeps).toThrow('No active trace');
+    });
+  });
+
+  // ── Integration (chunk 05) ──
+
+  describe('integration', () => {
+    it('records 1000 tokens and getTokenSpend returns non-zero cost', async () => {
+      const bridge = new CliObserverBridge(defaultConfig);
+      bridge.startTrace('session-1');
+      const deps = bridge.observerDeps;
+
+      const span = deps.startSpan(deps.trace, { name: 'cost-span' });
+      deps.recordTokenUsage(
+        span,
+        { promptTokens: 1000, completionTokens: 0, model: 'claude-sonnet-4-6' },
+        deps.counter,
+      );
+      deps.endSpan(span);
+
+      const spend = await bridge.getTokenSpend('session-1');
+
+      expect(spend.inputTokens).toBe(1000);
+      expect(spend.totalTokens).toBe(1000);
+      expect(spend.estimatedCostUsd).toBeGreaterThan(0);
+      // claude-sonnet-4-6: 1000 / 1_000_000 * 3.0 = 0.003
+      expect(spend.estimatedCostUsd).toBeCloseTo(0.003, 5);
+    });
+
+    it('records tokens exceeding budget and breaker.check() returns tripped: true', async () => {
+      const bridge = new CliObserverBridge({ budgetLimitUsd: 0.001 });
+      bridge.startTrace('session-1');
+      const deps = bridge.observerDeps;
+
+      // claude-opus-4-6: 1000 / 1_000_000 * 15.0 = $0.015 > $0.001
+      const span = deps.startSpan(deps.trace, { name: 'expensive-span' });
+      deps.recordTokenUsage(
+        span,
+        { promptTokens: 1000, completionTokens: 0, model: 'claude-opus-4-6' },
+        deps.counter,
+      );
+      deps.endSpan(span);
+
+      const spend = await bridge.getTokenSpend('session-1');
+      const result = deps.breaker.check(spend.estimatedCostUsd);
+
+      expect(spend.estimatedCostUsd).toBeGreaterThan(0.001);
+      expect(result.tripped).toBe(true);
+    });
   });
 });
