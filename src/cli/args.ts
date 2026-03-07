@@ -60,8 +60,9 @@ export function parseArgs(argv: string[] = process.argv.slice(2)): CliArgs {
   // Extract subcommand if first positional arg matches
   let subcommand: Subcommand;
   let flagArgs = argv;
-  if (argv.length > 0 && VALID_SUBCOMMANDS.has(argv[0]!) && !argv[0]!.startsWith('-')) {
-    subcommand = argv[0] as 'interview' | 'plan' | 'run';
+  const first = argv[0];
+  if (first !== undefined && VALID_SUBCOMMANDS.has(first) && !first.startsWith('-')) {
+    subcommand = first as 'interview' | 'plan' | 'run';
     flagArgs = argv.slice(1);
   }
 

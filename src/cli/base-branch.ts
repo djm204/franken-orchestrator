@@ -2,54 +2,53 @@ import { execSync } from 'node:child_process';
 import type { InterviewIO } from '../planning/interview-loop.js';
 
 /**
- * Detects the current git branch in the given directory.
- * Returns undefined if not in a git repository.
+ * Detects the current git branch.
+ * Returns undefined if not in a git repo.
  */
-export function detectCurrentBranch(dir: string): string | undefined {
+export function detectCurrentBranch(workingDir: string): string | undefined {
   try {
-    const branch = execSync('git rev-parse --abbrev-ref HEAD', {
-      cwd: dir,
+    return execSync('git rev-parse --abbrev-ref HEAD', {
+      cwd: workingDir,
       encoding: 'utf-8',
       stdio: ['pipe', 'pipe', 'pipe'],
     }).trim();
-    return branch || undefined;
   } catch {
     return undefined;
   }
 }
 
 /**
- * Resolves the base branch from CLI args, git detection, or defaults to 'main'.
- * If a branch is detected and differs from 'main', prompts the user to confirm.
+ * Resolves the base branch to use for git isolation.
+ *
+ * 1. If --base-branch flag provided, use it (no prompt).
+ * 2. If current branch is 'main' or 'master', use it silently.
+ * 3. Otherwise, prompt user for confirmation.
  */
 export async function resolveBaseBranch(
-  root: string,
+  workingDir: string,
   cliOverride: string | undefined,
   io: InterviewIO,
 ): Promise<string> {
-  // CLI override takes precedence — no prompting needed
   if (cliOverride) {
     return cliOverride;
   }
 
-  const detected = detectCurrentBranch(root);
-
-  if (!detected) {
-    io.display('Not in a git repository. Defaulting to base branch: main');
+  const current = detectCurrentBranch(workingDir);
+  if (!current) {
+    io.display('Warning: Not in a git repository. Defaulting base branch to "main".');
     return 'main';
   }
 
-  if (detected === 'main' || detected === 'master') {
-    return detected;
+  if (current === 'main' || current === 'master') {
+    return current;
   }
 
-  // On a non-main branch — ask user to confirm
   const answer = await io.ask(
-    `Detected branch: ${detected}. Use as base branch? (y/n)`,
+    `You're on branch "${current}". Are you sure you want to target this as your base branch? (y/n)`,
   );
-
-  if (answer.trim().toLowerCase() === 'y' || answer.trim().toLowerCase() === 'yes') {
-    return detected;
+  const normalized = answer.trim().toLowerCase();
+  if (normalized === 'y' || normalized === 'yes') {
+    return current;
   }
 
   return 'main';

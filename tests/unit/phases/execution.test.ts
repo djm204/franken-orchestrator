@@ -521,4 +521,36 @@ describe('runExecution', () => {
       expect.objectContaining({ taskId: 't1', status: 'success' }),
     );
   });
+
+  it('refreshes plan during execution and runs newly discovered tasks', async () => {
+    const c = ctx([
+      { id: 't1', objective: 'first', requiredSkills: [], dependsOn: [] },
+    ]);
+    const refreshPlanTasks = vi
+      .fn<() => Promise<readonly { id: string; objective: string; requiredSkills: readonly string[]; dependsOn: readonly string[] }[]>>()
+      .mockResolvedValueOnce([
+        { id: 't1', objective: 'first', requiredSkills: [], dependsOn: [] },
+        { id: 't2', objective: 'second', requiredSkills: [], dependsOn: ['t1'] },
+      ])
+      .mockResolvedValueOnce([
+        { id: 't1', objective: 'first', requiredSkills: [], dependsOn: [] },
+        { id: 't2', objective: 'second', requiredSkills: [], dependsOn: ['t1'] },
+      ]);
+
+    const outcomes = await runExecution(
+      c,
+      makeSkills(),
+      makeGovernor(),
+      makeMemory(),
+      makeObserver(),
+      undefined,
+      makeLogger(),
+      undefined,
+      undefined,
+      refreshPlanTasks,
+    );
+
+    expect(outcomes.map(o => o.taskId)).toEqual(['t1', 't2']);
+    expect(outcomes.every(o => o.status === 'success')).toBe(true);
+  });
 });

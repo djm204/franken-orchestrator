@@ -92,13 +92,22 @@ export class CliSkillExecutor {
   private readonly observer: ObserverDeps;
   private readonly verifyCommand?: string | undefined;
   private readonly commitMessageFn?: CommitMessageFn | undefined;
+  private readonly logger?: ILogger | undefined;
 
-  constructor(ralph: RalphLoop, git: GitBranchIsolator, observer: ObserverDeps, verifyCommand?: string, commitMessageFn?: CommitMessageFn) {
+  constructor(
+    ralph: RalphLoop,
+    git: GitBranchIsolator,
+    observer: ObserverDeps,
+    verifyCommand?: string,
+    commitMessageFn?: CommitMessageFn,
+    logger?: ILogger,
+  ) {
     this.ralph = ralph;
     this.git = git;
     this.observer = observer;
     this.verifyCommand = verifyCommand;
     this.commitMessageFn = commitMessageFn;
+    this.logger = logger;
   }
 
   async recoverDirtyFiles(
@@ -109,6 +118,7 @@ export class CliSkillExecutor {
   ): Promise<'clean' | 'committed' | 'reset'> {
     const status = this.git.getStatus();
     if (status.length === 0) return 'clean';
+    const chunkId = this.extractChunkId(taskId);
 
     if (this.verifyCommand) {
       try {
@@ -129,14 +139,14 @@ export class CliSkillExecutor {
     }
 
     // Verification passed (or no verify command) — auto-commit dirty files
-    this.git.autoCommit(taskId, 'recovery', 0);
+    this.git.autoCommit(chunkId, 'recovery', 0);
     const commitHash = this.git.getCurrentHead();
     checkpoint.recordCommit(taskId, stage, -1, commitHash);
     logger?.info('Recovery: auto-committed dirty files', { taskId });
     return 'committed';
   }
 
-  async execute(skillId: string, _input: SkillInput, config: CliSkillConfig, checkpoint?: ICheckpointStore, taskId?: string): Promise<SkillResult> {
+  async execute(skillId: string, input: SkillInput, config: CliSkillConfig, checkpoint?: ICheckpointStore, taskId?: string): Promise<SkillResult> {
     if (!skillId || skillId.trim().length === 0) {
       throw new Error('skillId must not be empty');
     }
@@ -168,10 +178,74 @@ export class CliSkillExecutor {
       );
     }
 
+    // Build ralph config with defaults from input when not explicitly provided
+    const isImpl = taskId?.startsWith('impl:') ?? true;
+    const defaultPromiseTag = isImpl ? `IMPL_${chunkId}_DONE` : `HARDEN_${chunkId}_DONE`;
+    const ralphDefaults: RalphLoopConfig = {
+      prompt: input.objective,
+      promiseTag: defaultPromiseTag,
+      maxIterations: 10,
+      maxTurns: 25,
+      provider: 'claude',
+      claudeCmd: 'claude',
+      codexCmd: 'codex',
+      timeoutMs: 600_000,
+      workingDir: this.git.getWorkingDir(),
+    };
+
     // Wire onIteration for observer integration
     const wrappedConfig: RalphLoopConfig = {
+      ...ralphDefaults,
       ...config.ralph,
+      onRateLimit: (provider: string) => {
+        this.logger?.warn('RalphLoop: provider rate limited', { chunkId, provider });
+        return config.ralph?.onRateLimit?.(provider);
+      },
+      onProviderAttempt: (provider: string, iteration: number) => {
+        this.logger?.info('RalphLoop: provider attempt', { chunkId, provider, iteration });
+        config.ralph?.onProviderAttempt?.(provider, iteration);
+      },
+      onProviderSwitch: (fromProvider: string, toProvider: string, reason: 'rate-limit' | 'post-sleep-reset') => {
+        this.logger?.warn('RalphLoop: provider switch', { chunkId, fromProvider, toProvider, reason });
+        config.ralph?.onProviderSwitch?.(fromProvider, toProvider, reason);
+      },
+      onSpawnError: (provider: string, error: string) => {
+        this.logger?.error('RalphLoop: provider spawn error', { chunkId, provider, error });
+        config.ralph?.onSpawnError?.(provider, error);
+      },
+      onProviderTimeout: (provider: string, timeoutMs: number) => {
+        this.logger?.warn('RalphLoop: provider iteration timeout', { chunkId, provider, timeoutMs });
+        config.ralph?.onProviderTimeout?.(provider, timeoutMs);
+      },
+      onSleep: (durationMs: number, source: string) => {
+        this.logger?.warn('RalphLoop: sleeping for rate limit reset', {
+          chunkId,
+          durationMs,
+          source,
+        });
+        config.ralph?.onSleep?.(durationMs, source);
+      },
       onIteration: (iteration: number, result: IterationResult) => {
+        this.logger?.info('RalphLoop: iteration complete', {
+          chunkId,
+          iteration,
+          exitCode: result.exitCode,
+          rateLimited: result.rateLimited,
+          promiseDetected: result.promiseDetected,
+          sleepMs: result.sleepMs,
+        });
+        // Full raw output -> build.log only (via debug, always captured)
+        if (result.stderr) {
+          this.logger?.debug(`RalphLoop: iter ${iteration} stderr`, { chunkId, stderr: result.stderr });
+        }
+        if (result.stdout) {
+          this.logger?.debug(`RalphLoop: iter ${iteration} stdout`, { chunkId, stdout: result.stdout.slice(0, 4000) });
+        }
+        // Surface errors on terminal when iteration fails (non-rate-limit)
+        if (result.exitCode !== 0 && !result.rateLimited && result.stderr) {
+          const excerpt = result.stderr.trim().split('\n').slice(-5).join('\n');
+          this.logger?.warn(`RalphLoop: iter ${iteration} failed`, { chunkId, exitCode: result.exitCode, stderr: excerpt });
+        }
         // Create iteration span
         const iterSpan = this.observer.startSpan(this.observer.trace, {
           name: `cli:${chunkId}:iter-${iteration}`,
@@ -182,7 +256,7 @@ export class CliSkillExecutor {
         this.observer.recordTokenUsage(
           iterSpan,
           {
-            promptTokens: Math.ceil(config.ralph.prompt.length / 4),
+            promptTokens: Math.ceil((config.ralph?.prompt?.length ?? 0) / 4),
             completionTokens: result.tokensEstimated,
           },
           this.observer.counter,
@@ -206,7 +280,7 @@ export class CliSkillExecutor {
         }
 
         // Forward to original callback if provided
-        config.ralph.onIteration?.(iteration, result);
+        config.ralph?.onIteration?.(iteration, result);
       },
     };
 
@@ -239,7 +313,7 @@ export class CliSkillExecutor {
     if (this.commitMessageFn) {
       try {
         const diffStat = this.git.getDiffStat(chunkId);
-        const msg = await this.commitMessageFn(diffStat, _input.objective);
+        const msg = await this.commitMessageFn(diffStat, input.objective);
         if (msg) commitMessage = msg;
       } catch {
         // Silently fall back to no message — never block the pipeline
@@ -287,8 +361,22 @@ export class CliSkillExecutor {
   }
 
   private extractChunkId(skillId: string): string {
-    const colonIndex = skillId.indexOf(':');
-    return colonIndex >= 0 ? skillId.slice(colonIndex + 1) : skillId;
+    const parts = skillId.split(':').filter(Boolean);
+    if (parts.length === 0) return skillId;
+
+    // Handle both canonical skill IDs (`cli:<chunkId>`) and accidental task IDs
+    // (`impl:<chunkId>`, `harden:<chunkId>`, `cli:impl:<chunkId>`).
+    if (parts[0] === 'cli' && parts.length >= 2) {
+      if ((parts[1] === 'impl' || parts[1] === 'harden') && parts.length >= 3) {
+        return parts.slice(2).join(':');
+      }
+      return parts.slice(1).join(':');
+    }
+    if ((parts[0] === 'impl' || parts[0] === 'harden') && parts.length >= 2) {
+      return parts.slice(1).join(':');
+    }
+
+    return parts.length >= 2 ? parts.slice(1).join(':') : parts[0]!;
   }
 
   private computeCurrentCost(): number {

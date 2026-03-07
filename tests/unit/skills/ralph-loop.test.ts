@@ -61,14 +61,17 @@ function baseConfig(overrides?: Partial<RalphLoopConfig>): RalphLoopConfig {
 
 describe('RalphLoop', () => {
   let RalphLoop: typeof import('../../../src/skills/ralph-loop.js').RalphLoop;
+  let stdoutWriteSpy: ReturnType<typeof vi.spyOn>;
 
   beforeEach(async () => {
     vi.resetAllMocks();
+    stdoutWriteSpy = vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
     const mod = await import('../../../src/skills/ralph-loop.js');
     RalphLoop = mod.RalphLoop;
   });
 
   afterEach(() => {
+    stdoutWriteSpy.mockRestore();
     vi.restoreAllMocks();
   });
 
@@ -105,6 +108,7 @@ describe('RalphLoop', () => {
 
   it('kills child with SIGTERM on timeout, then SIGKILL after 5s', async () => {
     vi.useFakeTimers();
+    const onProviderTimeout = vi.fn();
 
     const hangingChild = mockChild({ hang: true });
     const killFn = hangingChild.kill as ReturnType<typeof vi.fn>;
@@ -122,17 +126,39 @@ describe('RalphLoop', () => {
     queueMock({ stdout: 'done\n<promise>IMPL_X_DONE</promise>', exitCode: 0 });
 
     const loop = new RalphLoop();
-    const runPromise = loop.run(baseConfig({ maxIterations: 2, timeoutMs: 5_000 }));
+    const runPromise = loop.run(baseConfig({ maxIterations: 2, timeoutMs: 5_000, onProviderTimeout }));
 
     // Advance past timeout
     await vi.advanceTimersByTimeAsync(5_001);
     expect(killFn).toHaveBeenCalledWith('SIGTERM');
+    expect(onProviderTimeout).toHaveBeenCalledWith('claude', 5_000);
 
     // Advance past SIGKILL grace period
     await vi.advanceTimersByTimeAsync(5_001);
     expect(killFn).toHaveBeenCalledWith('SIGKILL');
 
     await runPromise;
+    vi.useRealTimers();
+  });
+
+  it('does not hang if child never closes after SIGKILL (hard timeout fallback)', async () => {
+    vi.useFakeTimers();
+
+    const hangingChild = mockChild({ hang: true });
+    mockSpawn.mockImplementationOnce(() => hangingChild);
+    // Next iteration succeeds so loop can complete.
+    queueMock({ stdout: 'done\n<promise>IMPL_X_DONE</promise>', exitCode: 0 });
+
+    const loop = new RalphLoop();
+    const runPromise = loop.run(baseConfig({ maxIterations: 2, timeoutMs: 1_000 }));
+
+    // timeoutMs + 5s (SIGKILL) + 7s fallback buffer
+    await vi.advanceTimersByTimeAsync(13_100);
+    const result = await runPromise;
+
+    expect(result.completed).toBe(true);
+    expect((hangingChild.kill as ReturnType<typeof vi.fn>)).toHaveBeenCalledWith('SIGTERM');
+    expect((hangingChild.kill as ReturnType<typeof vi.fn>)).toHaveBeenCalledWith('SIGKILL');
     vi.useRealTimers();
   });
 
@@ -150,6 +176,7 @@ describe('RalphLoop', () => {
         '--print', '--dangerously-skip-permissions',
         '--output-format', 'stream-json',
         '--verbose',
+        '--disable-slash-commands',
         'Implement feature X',
         '--max-turns', '10',
       ],
@@ -176,6 +203,56 @@ describe('RalphLoop', () => {
         cwd: '/tmp/test-project',
       }),
     );
+  });
+
+  it('normalizes codex JSON output to readable text and detects promise tag', async () => {
+    queueMock({
+      stdout: [
+        '{"type":"event","content":[{"type":"output_text","text":"Implemented chunk 11"}]}',
+        '{"type":"event","content":[{"type":"output_text","text":"<promise>IMPL_X_DONE</promise>"}]}',
+      ].join('\n'),
+      exitCode: 0,
+    });
+
+    const onIteration = vi.fn();
+    const loop = new RalphLoop();
+    const result = await loop.run(baseConfig({ provider: 'codex', onIteration }));
+
+    expect(result.completed).toBe(true);
+    expect(result.output).toContain('Implemented chunk 11');
+    expect(result.output).toContain('<promise>IMPL_X_DONE</promise>');
+    const firstIter = onIteration.mock.calls[0] as [number, IterationResult];
+    expect(firstIter[1].stdout).toContain('Implemented chunk 11');
+  });
+
+  it('does not treat successful codex narrative text as rate limited', async () => {
+    queueMock({
+      stdout: [
+        '{"type":"event","content":[{"type":"output_text","text":"Implementing rate limit resilience now"}]}',
+        '{"type":"event","content":[{"type":"output_text","text":"<promise>IMPL_X_DONE</promise>"}]}',
+      ].join('\n'),
+      exitCode: 0,
+    });
+
+    const onIteration = vi.fn();
+    const onRateLimit = vi.fn();
+    const loop = new RalphLoop();
+    const result = await loop.run(baseConfig({ provider: 'codex', onIteration, onRateLimit }));
+
+    expect(result.completed).toBe(true);
+    const firstIter = onIteration.mock.calls[0] as [number, IterationResult];
+    expect(firstIter[1].rateLimited).toBe(false);
+    expect(onRateLimit).not.toHaveBeenCalled();
+  });
+
+  it('preserves codex output when stdout is not JSON', async () => {
+    queueMock({ stdout: 'plain codex text\n<promise>IMPL_X_DONE</promise>', exitCode: 0 });
+
+    const loop = new RalphLoop();
+    const result = await loop.run(baseConfig({ provider: 'codex' }));
+
+    expect(result.completed).toBe(true);
+    expect(result.output).toContain('plain codex text');
   });
 
   // ── 6. Non-zero exit code — continues to next iteration ──

@@ -3,6 +3,7 @@
 import { createInterface } from 'node:readline';
 import { parseArgs, printUsage } from './args.js';
 import type { CliArgs } from './args.js';
+import { loadConfig } from './config-loader.js';
 import { resolveProjectRoot, getProjectPaths, scaffoldFrankenbeast } from './project-root.js';
 import { resolveBaseBranch } from './base-branch.js';
 import { Session } from './session.js';
@@ -59,6 +60,12 @@ async function main(): Promise<void> {
   if (args.help) {
     printUsage();
     process.exit(0);
+  }
+
+  const config = await loadConfig(args);
+
+  if (args.verbose) {
+    console.log('Config:', JSON.stringify(config, null, 2));
   }
 
   console.log(BANNER);

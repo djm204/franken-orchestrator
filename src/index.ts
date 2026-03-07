@@ -1,6 +1,13 @@
 // Beast Loop orchestrator
 export { BeastLoop } from './beast-loop.js';
 
+// CLI
+export type { CliArgs, Subcommand } from './cli/args.js';
+export { parseArgs, printUsage } from './cli/args.js';
+export type { ProjectPaths } from './cli/project-root.js';
+export { resolveProjectRoot, getProjectPaths, scaffoldFrankenbeast } from './cli/project-root.js';
+export { detectCurrentBranch, resolveBaseBranch } from './cli/base-branch.js';
+
 // Dependencies
 export type { BeastLoopDeps } from './deps.js';
 export type {
@@ -77,7 +84,7 @@ export type { GraphBuilder } from './planning/chunk-file-graph-builder.js';
 
 // CLI skill execution
 export { CliSkillExecutor } from './skills/cli-skill-executor.js';
-export { RalphLoop } from './skills/ralph-loop.js';
+export { RalphLoop, parseResetTime } from './skills/ralph-loop.js';
 export { GitBranchIsolator } from './skills/git-branch-isolator.js';
 export type {
   CliSkillConfig,
@@ -114,10 +121,6 @@ export { GracefulShutdown } from './resilience/graceful-shutdown.js';
 export type { ShutdownHandler } from './resilience/graceful-shutdown.js';
 export { checkModuleHealth, allHealthy } from './resilience/module-initializer.js';
 export type { ModuleHealth } from './resilience/module-initializer.js';
-
-// CLI — project root
-export { resolveProjectRoot, getProjectPaths, scaffoldFrankenbeast } from './cli/project-root.js';
-export type { ProjectPaths } from './cli/project-root.js';
 
 // CLI — file writer
 export { writeDesignDoc, readDesignDoc } from './cli/file-writer.js';

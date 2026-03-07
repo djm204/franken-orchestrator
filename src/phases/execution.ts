@@ -40,6 +40,7 @@ export async function runExecution(
   logger: ILogger = new NullLogger(),
   cliExecutor?: CliSkillExecutor,
   checkpoint?: ICheckpointStore,
+  refreshPlanTasks?: () => Promise<readonly PlanTask[]>,
 ): Promise<readonly TaskOutcome[]> {
   ctx.phase = 'execution';
   ctx.addAudit('orchestrator', 'phase:start', { phase: 'execution' });
@@ -52,14 +53,35 @@ export async function runExecution(
   const outcomes: TaskOutcome[] = [];
   const completed = new Set<string>();
   const completedOutputs = new Map<string, unknown>();
+  const knownTaskIds = new Set(ctx.plan.tasks.map((t) => t.id));
 
   // Simple topological execution: iterate tasks, skip those with unmet deps
   const pending = [...ctx.plan.tasks];
   let iterations = 0;
-  const maxIterations = pending.length * 2; // safety guard
+  let maxIterations = Math.max(pending.length * 2, 10); // safety guard
 
   while (pending.length > 0 && iterations < maxIterations) {
     iterations++;
+    if (refreshPlanTasks) {
+      const latestTasks = await refreshPlanTasks();
+      let addedCount = 0;
+      for (const task of latestTasks) {
+        if (!knownTaskIds.has(task.id)) {
+          knownTaskIds.add(task.id);
+          pending.push(task);
+          addedCount++;
+        }
+      }
+      if (addedCount > 0) {
+        maxIterations += addedCount * 2;
+        ctx.plan = { tasks: [...ctx.plan.tasks, ...latestTasks.filter(t => !ctx.plan!.tasks.some(p => p.id === t.id))] };
+        logger.info('Execution: plan refreshed', {
+          addedTasks: addedCount,
+          totalTasks: knownTaskIds.size,
+        });
+      }
+    }
+
     const readyIndex = pending.findIndex(t =>
       t.dependsOn.every(dep => completed.has(dep)),
     );
@@ -81,7 +103,7 @@ export async function runExecution(
     // Skip tasks already completed in a previous run (checkpoint recovery)
     if (checkpoint?.has(`${task.id}:done`)) {
       logger.info('Execution: Skipping checkpointed task', { taskId: task.id });
-      outcomes.push({ taskId: task.id, status: 'skipped' });
+      outcomes.push({ taskId: task.id, status: 'success' });
       completed.add(task.id);
       continue;
     }
@@ -146,12 +168,13 @@ async function executeTask(
   });
   logger.debug('Execution: task detail', { task });
 
-  // Dirty file resume: recover partial work from a crashed run
-  if (checkpoint && cliExecutor && checkpoint.lastCommit(task.id, 'impl')) {
-    await cliExecutor.recoverDirtyFiles(task.id, 'impl', checkpoint, logger);
-  }
-
   try {
+    // Dirty file resume: recover partial work from a crashed run.
+    // Keep this inside try/catch so recovery failures are captured as task failures.
+    if (checkpoint && cliExecutor && checkpoint.lastCommit(task.id, 'impl')) {
+      await cliExecutor.recoverDirtyFiles(task.id, 'impl', checkpoint, logger);
+    }
+
     // Check HITL requirement
     const requiresHitl = task.requiredSkills.some(s => {
       const available = skills.getAvailableSkills();

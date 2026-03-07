@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { RalphLoopConfig, IterationResult, CliSkillConfig, GitIsolationConfig } from '../../../src/skills/cli-types.js';
 import type { SkillInput, ICheckpointStore } from '../../../src/deps.js';
+import { makeLogger } from '../../helpers/stubs.js';
 
 // ── Factories ──
 
@@ -84,6 +85,9 @@ function makeMockGit() {
     hasMeaningfulChange: vi.fn(),
     getCurrentHead: vi.fn(),
     getDiffStat: vi.fn().mockReturnValue('src/foo.ts | 10 +++\n'),
+    getWorkingDir: vi.fn().mockReturnValue('/tmp/test-repo'),
+    getStatus: vi.fn().mockReturnValue(''),
+    resetHard: vi.fn(),
   };
 }
 
@@ -382,6 +386,30 @@ describe('CliSkillExecutor', () => {
 
       // Should still merge, just without a message
       expect(git.merge).toHaveBeenCalledWith('01_types');
+    });
+  });
+
+  describe('progress logging', () => {
+    it('logs rate limit sleep metadata via logger callback wiring', async () => {
+      const logger = makeLogger();
+      ralph.run.mockImplementation(async (config: RalphLoopConfig) => {
+        config.onSleep?.(30_000, 'retry-after header');
+        config.onIteration?.(1, makeIterResult({ iteration: 1, rateLimited: true, sleepMs: 30_000 }));
+        return { completed: true, iterations: 1, output: 'done', tokensUsed: 100 };
+      });
+
+      const { CliSkillExecutor } = await import('../../../src/skills/cli-skill-executor.js');
+      const executor = new CliSkillExecutor(ralph as any, git as any, observer, undefined, undefined, logger);
+      await executor.execute('cli:01_types', makeSkillInput(), makeCliConfig());
+
+      expect(logger.warn).toHaveBeenCalledWith(
+        'RalphLoop: sleeping for rate limit reset',
+        expect.objectContaining({ chunkId: '01_types', durationMs: 30_000 }),
+      );
+      expect(logger.info).toHaveBeenCalledWith(
+        'RalphLoop: iteration complete',
+        expect.objectContaining({ chunkId: '01_types', iteration: 1, rateLimited: true }),
+      );
     });
   });
 

@@ -209,6 +209,7 @@ export interface BeastLoopDeps {
   readonly cliExecutor?: CliSkillExecutor;
   readonly clock: () => Date;
   readonly checkpoint?: ICheckpointStore;
+  readonly refreshPlanTasks?: () => Promise<readonly PlanTask[]>;
 }
 
 type _TypesAndInterfacesTest = {

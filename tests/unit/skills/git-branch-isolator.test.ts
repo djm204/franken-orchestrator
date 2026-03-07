@@ -31,10 +31,18 @@ describe('GitBranchIsolator', () => {
 
   describe('isolate()', () => {
     it('creates a new branch from baseBranch and checks it out', () => {
+      mockExecSync.mockImplementation((cmd: string) => {
+        if (cmd === 'git branch --list chunk/03_my_chunk') return '';
+        return '';
+      });
       isolator.isolate('03_my_chunk');
 
       expect(mockExecSync).toHaveBeenCalledWith(
         'git checkout main',
+        expect.objectContaining({ cwd: '/fake/repo' }),
+      );
+      expect(mockExecSync).toHaveBeenCalledWith(
+        'git branch --list chunk/03_my_chunk',
         expect.objectContaining({ cwd: '/fake/repo' }),
       );
       expect(mockExecSync).toHaveBeenCalledWith(
@@ -43,12 +51,10 @@ describe('GitBranchIsolator', () => {
       );
     });
 
-    it('checks out existing branch if creation fails', () => {
+    it('checks out existing branch when it already exists', () => {
       mockExecSync
         .mockReturnValueOnce('') // git checkout main
-        .mockImplementationOnce(() => {
-          throw new Error('branch already exists');
-        }) // git checkout -b fails
+        .mockReturnValueOnce('  chunk/03_my_chunk\n') // git branch --list
         .mockReturnValueOnce(''); // git checkout (existing)
 
       isolator.isolate('03_my_chunk');
@@ -56,6 +62,10 @@ describe('GitBranchIsolator', () => {
       expect(mockExecSync).toHaveBeenCalledWith(
         'git checkout chunk/03_my_chunk',
         expect.objectContaining({ cwd: '/fake/repo' }),
+      );
+      expect(mockExecSync).not.toHaveBeenCalledWith(
+        'git checkout -b chunk/03_my_chunk',
+        expect.anything(),
       );
     });
   });
