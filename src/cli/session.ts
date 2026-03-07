@@ -32,6 +32,18 @@ export interface SessionConfig {
   designDocPath?: string;
   /** Pre-existing plan dir (--plan-dir flag) */
   planDirOverride?: string;
+  /** Maximum plan-critique iterations before escalation */
+  maxCritiqueIterations?: number | undefined;
+  /** Maximum execution time in milliseconds */
+  maxDurationMs?: number | undefined;
+  /** Whether to emit observability spans */
+  enableTracing?: boolean | undefined;
+  /** Whether to run a heartbeat pulse after execution */
+  enableHeartbeat?: boolean | undefined;
+  /** Minimum critique score to pass (0-1) */
+  minCritiqueScore?: number | undefined;
+  /** Maximum total tokens before budget breaker trips */
+  maxTotalTokens?: number | undefined;
 }
 
 export class Session {

@@ -1,15 +1,17 @@
 #!/usr/bin/env node
 
 import { createInterface } from 'node:readline';
+import { existsSync } from 'node:fs';
 import { parseArgs, printUsage } from './args.js';
 import type { CliArgs } from './args.js';
 import { loadConfig } from './config-loader.js';
+import type { OrchestratorConfig } from '../config/orchestrator-config.js';
 import { resolveProjectRoot, getProjectPaths, scaffoldFrankenbeast } from './project-root.js';
 import { resolveBaseBranch } from './base-branch.js';
 import { Session } from './session.js';
 import type { SessionPhase } from './session.js';
 import type { InterviewIO } from '../planning/interview-loop.js';
-import { BANNER } from '../logging/beast-logger.js';
+import { BANNER, BeastLogger } from '../logging/beast-logger.js';
 
 /**
  * Creates an InterviewIO backed by stdin/stdout.
@@ -54,6 +56,17 @@ export function resolvePhases(args: Pick<CliArgs, 'subcommand' | 'designDoc' | '
   return { entryPhase: 'interview' };
 }
 
+/**
+ * Validates config path and loads config from all sources.
+ * Exported for testability.
+ */
+export async function resolveConfig(args: CliArgs): Promise<OrchestratorConfig> {
+  if (args.config && !existsSync(args.config)) {
+    throw new Error(`Config file not found: ${args.config}`);
+  }
+  return loadConfig(args);
+}
+
 async function main(): Promise<void> {
   const args = parseArgs();
 
@@ -62,7 +75,14 @@ async function main(): Promise<void> {
     process.exit(0);
   }
 
-  const config = await loadConfig(args);
+  const config = await resolveConfig(args);
+
+  const logger = new BeastLogger({ verbose: args.verbose });
+  if (args.config) {
+    logger.info(`Loaded config from ${args.config}`, 'config');
+  } else {
+    logger.info('Using default config (env + defaults)', 'config');
+  }
 
   if (args.verbose) {
     console.log('Config:', JSON.stringify(config, null, 2));
@@ -98,6 +118,12 @@ async function main(): Promise<void> {
     ...(exitAfter !== undefined ? { exitAfter } : {}),
     ...(args.designDoc !== undefined ? { designDocPath: args.designDoc } : {}),
     ...(args.planDir !== undefined ? { planDirOverride: args.planDir } : {}),
+    maxCritiqueIterations: config.maxCritiqueIterations,
+    maxDurationMs: config.maxDurationMs,
+    enableTracing: config.enableTracing,
+    enableHeartbeat: config.enableHeartbeat,
+    minCritiqueScore: config.minCritiqueScore,
+    maxTotalTokens: config.maxTotalTokens,
   });
 
   const result = await session.start();
