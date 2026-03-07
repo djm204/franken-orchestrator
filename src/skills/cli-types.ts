@@ -33,6 +33,7 @@ export interface RalphLoopConfig {
   readonly onProviderAttempt?: ((provider: string, iteration: number) => void) | undefined;
   readonly onProviderSwitch?: ((fromProvider: string, toProvider: string, reason: 'rate-limit' | 'post-sleep-reset') => void) | undefined;
   readonly onSpawnError?: ((provider: string, error: string) => void) | undefined;
+  readonly onProviderTimeout?: ((provider: string, timeoutMs: number) => void) | undefined;
   /** @internal Injected sleep function for testing — do not use in production. */
   readonly _sleepFn?: ((ms: number) => Promise<void>) | undefined;
 }

@@ -4,9 +4,11 @@ import type { RalphLoopConfig, RalphLoopResult, IterationResult } from './cli-ty
 const RATE_LIMIT_PATTERNS =
   /rate.?limit|429|too many requests|retry.?after|overloaded|capacity|temporarily unavailable|out of extra usage|usage limit|resets?\s+\d|resets?\s+in\s+\d+\s*s/i;
 
-function isRateLimited(stderr: string, stdout: string, exitCode: number): boolean {
-  if (exitCode !== 0 && RATE_LIMIT_PATTERNS.test(stderr)) return true;
-  return RATE_LIMIT_PATTERNS.test(stderr) || RATE_LIMIT_PATTERNS.test(stdout);
+function isRateLimited(stderr: string): boolean {
+  // Only check stderr for rate-limit signals. Checking stdout causes false
+  // positives when the model's output contains rate-limit-related text (e.g.
+  // implementing rate limiting features).
+  return RATE_LIMIT_PATTERNS.test(stderr);
 }
 
 export function parseResetTime(stderr: string, stdout: string): { sleepSeconds: number; source: string } {
@@ -114,6 +116,9 @@ function buildClaudeArgs(prompt: string, maxTurns: number): string[] {
     '--print', '--dangerously-skip-permissions',
     '--output-format', 'stream-json',
     '--verbose',
+    '--disable-slash-commands',
+    '--no-session-persistence',
+    '--plugin-dir', '/dev/null',
     prompt,
     '--max-turns', String(maxTurns),
   ];
@@ -180,7 +185,7 @@ export function normalizeCodexOutput(stdout: string): string {
 function spawnIteration(
   config: RalphLoopConfig,
   provider: 'claude' | 'codex',
-): Promise<{ stdout: string; stderr: string; exitCode: number }> {
+): Promise<{ stdout: string; stderr: string; exitCode: number; timedOut: boolean }> {
   return new Promise((resolve, reject) => {
     const cmd = provider === 'claude' ? config.claudeCmd : config.codexCmd;
     const args = provider === 'claude'
@@ -189,7 +194,14 @@ function spawnIteration(
 
     const env = { ...process.env };
     if (provider === 'claude') {
-      delete env['CLAUDECODE'];
+      // Remove ALL Claude-related env vars to prevent the spawned CLI from
+      // inheriting parent session state (e.g. CLAUDE_CODE_ENTRYPOINT=claude-vscode
+      // causes it to try connecting to VS Code and freeze).
+      for (const key of Object.keys(env)) {
+        if (key.startsWith('CLAUDE')) {
+          delete env[key];
+        }
+      }
     }
 
     const child = spawn(cmd, args, {
@@ -201,23 +213,52 @@ function spawnIteration(
     let stdout = '';
     let stderr = '';
     let settled = false;
+    let timedOut = false;
 
-    const finish = (result: { stdout: string; stderr: string; exitCode: number }): void => {
+    const finish = (result: { stdout: string; stderr: string; exitCode: number; timedOut: boolean }): void => {
       if (settled) return;
       settled = true;
       resolve(result);
     };
 
+    let lineBuffer = '';
+
     child.stdout!.on('data', (chunk: Buffer) => {
-      stdout += chunk.toString();
+      const text = chunk.toString();
+      stdout += text;
+      // Stream output to terminal so the user can see Claude working
+      if (provider === 'claude') {
+        lineBuffer += text;
+        const lines = lineBuffer.split('\n');
+        lineBuffer = lines.pop() ?? ''; // keep incomplete last line
+        for (const line of lines) {
+          const trimmed = line.trim();
+          if (!trimmed) continue;
+          try {
+            const obj = JSON.parse(trimmed) as Record<string, unknown>;
+            const parts: string[] = [];
+            tryExtractTextFromNode(obj, parts);
+            if (parts.length > 0) process.stdout.write(parts.join(''));
+          } catch {
+            // Not JSON — show as-is (error messages, startup banners, etc.)
+            process.stdout.write(trimmed + '\n');
+          }
+        }
+      } else {
+        process.stdout.write(text);
+      }
     });
 
     child.stderr!.on('data', (chunk: Buffer) => {
       stderr += chunk.toString();
+      // stderr is captured for build.log via onIteration callback — not piped
+      // to terminal (too noisy with --verbose). Errors surface via logger.
     });
 
     // Timeout: SIGTERM first, then SIGKILL after 5s
     const timer = setTimeout(() => {
+      timedOut = true;
+      config.onProviderTimeout?.(provider, config.timeoutMs);
       child.kill('SIGTERM');
       setTimeout(() => {
         try { child.kill('SIGKILL'); } catch { /* already dead */ }
@@ -228,13 +269,14 @@ function spawnIteration(
           stdout,
           stderr: `${stderr}\n[RalphLoop] iteration timed out after ${config.timeoutMs}ms`,
           exitCode: 124,
+          timedOut: true,
         });
       }, 7_000);
     }, config.timeoutMs);
 
     child.on('close', (code) => {
       clearTimeout(timer);
-      finish({ stdout, stderr, exitCode: code ?? 1 });
+      finish({ stdout, stderr, exitCode: code ?? 1, timedOut });
     });
 
     child.on('error', (err) => {
@@ -270,7 +312,7 @@ export class RalphLoop {
       const startTime = Date.now();
       config.onProviderAttempt?.(activeProvider, iteration);
 
-      let result: { stdout: string; stderr: string; exitCode: number };
+      let result: { stdout: string; stderr: string; exitCode: number; timedOut: boolean };
       try {
         result = await spawnIteration(config, activeProvider);
       } catch (error) {
@@ -289,7 +331,9 @@ export class RalphLoop {
       const tokensEstimated = Math.ceil(normalizedStdout.length / tokenDivisor);
       totalTokens += tokensEstimated;
 
-      const rateLimited = isRateLimited(result.stderr, normalizedStdout, result.exitCode);
+      // Never treat timed-out iterations as rate-limited — the timeout killed the
+      // process, any "rate limit" text in stdout is the model's code, not an API error.
+      const rateLimited = !result.timedOut && isRateLimited(result.stderr);
       const promiseDetected = promiseRegex.test(normalizedStdout);
 
       const iterResult: IterationResult = {

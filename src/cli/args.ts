@@ -1,28 +1,55 @@
 import { parseArgs as nodeParseArgs } from 'node:util';
 
+export type Subcommand = 'interview' | 'plan' | 'run' | undefined;
+
 export interface CliArgs {
-  projectId: string;
-  config?: string | undefined;
-  provider?: string | undefined;
-  model?: string | undefined;
-  dryRun: boolean;
+  subcommand: Subcommand;
+  baseDir: string;
+  baseBranch?: string | undefined;
+  budget: number;
+  provider: 'claude' | 'codex';
+  designDoc?: string | undefined;
+  planDir?: string | undefined;
+  noPr: boolean;
   verbose: boolean;
-  resume?: string | undefined;
+  reset: boolean;
+  resume: boolean;
+  config?: string | undefined;
   help: boolean;
 }
 
+const VALID_SUBCOMMANDS = new Set(['interview', 'plan', 'run']);
+
 const USAGE = `
-Usage: frankenbeast [options]
+Usage: frankenbeast [subcommand] [options]
+
+Subcommands:
+  interview               Gather requirements interactively, generate design doc
+  plan --design-doc <f>   Decompose design doc into chunk files
+  run                     Execute chunk files (from .frankenbeast/ or --plan-dir)
 
 Options:
-  --project-id <id>    Project identifier (required)
-  --config <path>      Path to config file (JSON)
-  --provider <name>    LLM provider (anthropic, openai, local-ollama)
-  --model <name>       Model name
-  --dry-run            Plan only, do not execute
-  --verbose            Enable verbose logging
-  --resume <path>      Resume from saved context snapshot
-  --help               Show this help message
+  --base-dir <path>       Project root (default: cwd)
+  --base-branch <name>    Git base branch (default: main)
+  --budget <usd>          Budget limit in USD (default: 10)
+  --provider <name>       claude | codex (default: claude)
+  --design-doc <path>     Path to design document
+  --plan-dir <path>       Path to chunk files directory
+  --config <path>         Path to config file (JSON)
+  --no-pr                 Skip PR creation
+  --verbose               Debug logs + trace viewer
+  --reset                 Clear checkpoint and traces
+  --resume                Resume from checkpoint
+  --help                  Show this help message
+
+Examples:
+  frankenbeast                              # full interactive flow
+  frankenbeast --design-doc design.md       # skip interview
+  frankenbeast --plan-dir ./chunks/         # skip to execution
+  frankenbeast interview                    # interview only
+  frankenbeast plan --design-doc design.md  # plan only
+  frankenbeast run                          # execute only
+  frankenbeast run --resume                 # resume execution
 `.trim();
 
 export function printUsage(): void {
@@ -30,29 +57,50 @@ export function printUsage(): void {
 }
 
 export function parseArgs(argv: string[] = process.argv.slice(2)): CliArgs {
+  // Extract subcommand if first positional arg matches
+  let subcommand: Subcommand;
+  let flagArgs = argv;
+  const first = argv[0];
+  if (first !== undefined && VALID_SUBCOMMANDS.has(first) && !first.startsWith('-')) {
+    subcommand = first as 'interview' | 'plan' | 'run';
+    flagArgs = argv.slice(1);
+  }
+
   const { values } = nodeParseArgs({
-    args: argv,
+    args: flagArgs,
     options: {
-      'project-id': { type: 'string' },
-      config: { type: 'string' },
+      'base-dir': { type: 'string' },
+      'base-branch': { type: 'string' },
+      budget: { type: 'string' },
       provider: { type: 'string' },
-      model: { type: 'string' },
-      'dry-run': { type: 'boolean', default: false },
+      'design-doc': { type: 'string' },
+      'plan-dir': { type: 'string' },
+      config: { type: 'string' },
+      'no-pr': { type: 'boolean', default: false },
       verbose: { type: 'boolean', default: false },
-      resume: { type: 'string' },
+      reset: { type: 'boolean', default: false },
+      resume: { type: 'boolean', default: false },
       help: { type: 'boolean', default: false },
     },
     strict: true,
   });
 
+  const providerRaw = values.provider?.toLowerCase();
+  const provider = providerRaw === 'codex' ? 'codex' : 'claude';
+
   return {
-    projectId: values['project-id'] ?? '',
+    subcommand,
+    baseDir: values['base-dir'] ?? process.cwd(),
+    baseBranch: values['base-branch'],
+    budget: values.budget ? parseFloat(values.budget) : 10,
+    provider,
+    designDoc: values['design-doc'],
+    planDir: values['plan-dir'],
     config: values.config,
-    provider: values.provider,
-    model: values.model,
-    dryRun: values['dry-run'] ?? false,
+    noPr: values['no-pr'] ?? false,
     verbose: values.verbose ?? false,
-    resume: values.resume,
+    reset: values.reset ?? false,
+    resume: values.resume ?? false,
     help: values.help ?? false,
   };
 }

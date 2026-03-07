@@ -99,30 +99,35 @@ export class BeastLogger implements ILogger {
     this.captureForFile = options.captureForFile ?? false;
   }
 
-  info(msg: string, _data?: unknown): void {
+  info(msg: string, data?: unknown): void {
     const ts = this.timestamp();
-    console.log(`${ts} ${A.cyan}${A.bold} INFO${A.reset} ${msg}`);
-    this.capture('INFO', msg);
+    const display = data !== undefined ? `${msg}  ${formatCompact(data)}` : msg;
+    console.log(`${ts} ${A.cyan}${A.bold} INFO${A.reset} ${display}`);
+    this.capture('INFO', this.withData(msg, data));
   }
 
-  debug(msg: string, _data?: unknown): void {
+  debug(msg: string, data?: unknown): void {
+    const line = this.withData(msg, data);
+    // Always capture to build.log; only print to terminal in verbose mode
+    this.capture('DEBUG', line);
     if (!this.verbose) return;
     const ts = this.timestamp();
-    const highlighted = highlightServices(msg);
+    const highlighted = highlightServices(line);
     console.log(`${ts} ${A.gray}DEBUG ${highlighted}${A.reset}`);
-    this.capture('DEBUG', msg);
   }
 
-  warn(msg: string, _data?: unknown): void {
+  warn(msg: string, data?: unknown): void {
     const ts = this.timestamp();
-    console.log(`${ts} ${A.yellow}${A.bold} WARN${A.reset} ${A.yellow}${msg}${A.reset}`);
-    this.capture('WARN', msg);
+    const display = data !== undefined ? `${msg}  ${formatCompact(data)}` : msg;
+    console.log(`${ts} ${A.yellow}${A.bold} WARN${A.reset} ${A.yellow}${display}${A.reset}`);
+    this.capture('WARN', this.withData(msg, data));
   }
 
-  error(msg: string, _data?: unknown): void {
+  error(msg: string, data?: unknown): void {
     const ts = this.timestamp();
-    console.log(`${ts} ${A.red}${A.bold}ERROR${A.reset} ${A.red}${msg}${A.reset}`);
-    this.capture('ERROR', msg);
+    const line = this.withData(msg, data);
+    console.log(`${ts} ${A.red}${A.bold}ERROR${A.reset} ${A.red}${line}${A.reset}`);
+    this.capture('ERROR', line);
   }
 
   /** Get captured log entries for writing to a plain-text log file. */
@@ -141,6 +146,28 @@ export class BeastLogger implements ILogger {
     const time = now.toTimeString().slice(0, 8);
     this.entries.push(`[${date} ${time}] [${level}] ${stripAnsi(msg)}`);
   }
+
+  private withData(msg: string, data: unknown): string {
+    if (data === undefined) return msg;
+    return `${msg} | ${safeStringify(data)}`;
+  }
 }
 
 export { A as ANSI };
+
+function safeStringify(value: unknown): string {
+  try {
+    return JSON.stringify(value, (_key, v) => typeof v === 'bigint' ? v.toString() : v);
+  } catch {
+    return String(value);
+  }
+}
+
+function formatCompact(data: unknown): string {
+  if (typeof data !== 'object' || data === null || Array.isArray(data)) {
+    return safeStringify(data);
+  }
+  const entries = Object.entries(data as Record<string, unknown>);
+  if (entries.length === 0) return '';
+  return entries.map(([k, v]) => `${k}=${typeof v === 'string' ? v : safeStringify(v)}`).join(' ');
+}

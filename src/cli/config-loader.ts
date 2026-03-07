@@ -40,10 +40,6 @@ async function fromFile(filePath: string): Promise<Partial<OrchestratorConfig>> 
 function fromCli(args: CliArgs): Partial<OrchestratorConfig> {
   const cli: Partial<OrchestratorConfig> = {};
 
-  if (args.dryRun) {
-    cli.enableHeartbeat = false;
-  }
-
   if (args.verbose) {
     cli.enableTracing = true;
   }
