@@ -1,8 +1,57 @@
 #!/usr/bin/env node
 
+import { createInterface } from 'node:readline';
 import { parseArgs, printUsage } from './args.js';
-import { loadConfig } from './config-loader.js';
-import { loadContext } from '../resilience/context-serializer.js';
+import type { CliArgs } from './args.js';
+import { resolveProjectRoot, getProjectPaths, scaffoldFrankenbeast } from './project-root.js';
+import { resolveBaseBranch } from './base-branch.js';
+import { Session } from './session.js';
+import type { SessionPhase } from './session.js';
+import type { InterviewIO } from '../planning/interview-loop.js';
+import { BANNER } from '../logging/beast-logger.js';
+
+/**
+ * Creates an InterviewIO backed by stdin/stdout.
+ */
+export function createStdinIO(): InterviewIO {
+  const rl = createInterface({ input: process.stdin, output: process.stdout });
+  return {
+    ask: (question: string) =>
+      new Promise<string>((resolve) => rl.question(`${question}\n> `, resolve)),
+    display: (message: string) => console.log(message),
+  };
+}
+
+/**
+ * Determines entry phase and exit behavior from CLI args.
+ * Subcommand takes precedence, then flags, then default.
+ */
+export function resolvePhases(args: Pick<CliArgs, 'subcommand' | 'designDoc' | 'planDir'>): {
+  entryPhase: SessionPhase;
+  exitAfter?: SessionPhase;
+} {
+  // Subcommand mode
+  if (args.subcommand === 'interview') {
+    return { entryPhase: 'interview', exitAfter: 'interview' };
+  }
+  if (args.subcommand === 'plan') {
+    return { entryPhase: 'plan', exitAfter: 'plan' };
+  }
+  if (args.subcommand === 'run') {
+    return { entryPhase: 'execute' };
+  }
+
+  // Default mode — detect entry from provided files
+  if (args.planDir) {
+    return { entryPhase: 'execute' };
+  }
+  if (args.designDoc) {
+    return { entryPhase: 'plan' };
+  }
+
+  // No files, no subcommand — full interactive flow
+  return { entryPhase: 'interview' };
+}
 
 async function main(): Promise<void> {
   const args = parseArgs();
@@ -12,58 +61,43 @@ async function main(): Promise<void> {
     process.exit(0);
   }
 
-  if (!args.projectId && !args.resume) {
-    console.error('Error: --project-id is required (or use --resume to continue a saved session)');
-    printUsage();
+  console.log(BANNER);
+
+  // Resolve project root
+  const root = resolveProjectRoot(args.baseDir);
+  const paths = getProjectPaths(root);
+  scaffoldFrankenbeast(paths);
+
+  // Create IO for interactive prompts
+  const io = createStdinIO();
+
+  // Resolve base branch
+  const baseBranch = await resolveBaseBranch(root, args.baseBranch, io);
+
+  // Determine phases
+  const { entryPhase, exitAfter } = resolvePhases(args);
+
+  // Create and run session
+  const session = new Session({
+    paths,
+    baseBranch,
+    budget: args.budget,
+    provider: args.provider,
+    noPr: args.noPr,
+    verbose: args.verbose,
+    reset: args.reset,
+    io,
+    entryPhase,
+    ...(exitAfter !== undefined ? { exitAfter } : {}),
+    ...(args.designDoc !== undefined ? { designDocPath: args.designDoc } : {}),
+    ...(args.planDir !== undefined ? { planDirOverride: args.planDir } : {}),
+  });
+
+  const result = await session.start();
+
+  if (result && result.status !== 'completed') {
     process.exit(1);
   }
-
-  const config = await loadConfig(args);
-
-  if (args.verbose) {
-    console.log('Config:', JSON.stringify(config, null, 2));
-  }
-
-  // Resume from saved context
-  if (args.resume) {
-    const ctx = await loadContext(args.resume);
-    console.log(`Resumed session ${ctx.sessionId} from phase: ${ctx.phase}`);
-    console.log(`Project: ${ctx.projectId}`);
-    console.log(`Intent: ${ctx.sanitizedIntent?.goal ?? ctx.userInput}`);
-    if (ctx.plan) {
-      console.log(`Plan: ${ctx.plan.tasks.length} task(s)`);
-    }
-    // Full resume execution would require re-wiring deps + continuing from the saved phase.
-    // For now, display the snapshot info.
-    return;
-  }
-
-  // Dry run: plan only, then print the plan
-  if (args.dryRun) {
-    console.log(`# Dry Run — Project: ${args.projectId}`);
-    console.log();
-    console.log('Configuration:');
-    console.log(`  Max critique iterations: ${config.maxCritiqueIterations}`);
-    console.log(`  Max total tokens: ${config.maxTotalTokens}`);
-    console.log(`  Max duration: ${config.maxDurationMs}ms`);
-    console.log(`  Heartbeat: ${config.enableHeartbeat ? 'enabled' : 'disabled'}`);
-    console.log(`  Tracing: ${config.enableTracing ? 'enabled' : 'disabled'}`);
-    console.log(`  Min critique score: ${config.minCritiqueScore}`);
-    console.log();
-    console.log('Provider:', args.provider ?? 'not specified');
-    console.log('Model:', args.model ?? 'not specified');
-    console.log();
-    console.log('> To run for real, remove the --dry-run flag.');
-    return;
-  }
-
-  // Full execution requires concrete module implementations,
-  // which would be wired up in a production entry point.
-  console.log(`Starting Beast Loop for project: ${args.projectId}`);
-  console.log('Provider:', args.provider ?? 'default');
-  console.log('Model:', args.model ?? 'default');
-  console.error('Error: Full execution requires module implementations. Use --dry-run for now.');
-  process.exit(1);
 }
 
 main().catch((error) => {

@@ -21,9 +21,14 @@ describe('Config loader', () => {
 
   function makeArgs(overrides: Partial<CliArgs> = {}): CliArgs {
     return {
-      projectId: 'test',
-      dryRun: false,
+      subcommand: undefined,
+      baseDir: '/test',
+      budget: 10,
+      provider: 'claude',
+      noPr: false,
       verbose: false,
+      reset: false,
+      resume: false,
       help: false,
       ...overrides,
     };
@@ -56,11 +61,6 @@ describe('Config loader', () => {
     process.env['FRANKEN_MAX_TOTAL_TOKENS'] = '75000';
     const config = await loadConfig(makeArgs({ config: filePath }));
     expect(config.maxTotalTokens).toBe(75_000);
-  });
-
-  it('--dry-run disables heartbeat', async () => {
-    const config = await loadConfig(makeArgs({ dryRun: true }));
-    expect(config.enableHeartbeat).toBe(false);
   });
 
   it('--verbose enables tracing', async () => {
