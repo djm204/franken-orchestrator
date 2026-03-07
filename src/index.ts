@@ -114,3 +114,10 @@ export { GracefulShutdown } from './resilience/graceful-shutdown.js';
 export type { ShutdownHandler } from './resilience/graceful-shutdown.js';
 export { checkModuleHealth, allHealthy } from './resilience/module-initializer.js';
 export type { ModuleHealth } from './resilience/module-initializer.js';
+
+// CLI — project root
+export { resolveProjectRoot, getProjectPaths, scaffoldFrankenbeast } from './cli/project-root.js';
+export type { ProjectPaths } from './cli/project-root.js';
+
+// CLI — file writer
+export { writeDesignDoc, readDesignDoc } from './cli/file-writer.js';
