@@ -242,9 +242,17 @@ export class CliSkillExecutor {
           this.logger?.debug(`RalphLoop: iter ${iteration} stdout`, { chunkId, stdout: result.stdout.slice(0, 4000) });
         }
         // Surface errors on terminal when iteration fails (non-rate-limit)
-        if (result.exitCode !== 0 && !result.rateLimited && result.stderr) {
-          const excerpt = result.stderr.trim().split('\n').slice(-5).join('\n');
-          this.logger?.warn(`RalphLoop: iter ${iteration} failed`, { chunkId, exitCode: result.exitCode, stderr: excerpt });
+        if (result.exitCode !== 0 && !result.rateLimited) {
+          const stderrExcerpt = result.stderr?.trim().split('\n').slice(-5).join('\n') ?? '';
+          const stdoutExcerpt = !stderrExcerpt && result.stdout
+            ? result.stdout.trim().split('\n').slice(-5).join('\n')
+            : '';
+          this.logger?.error(`RalphLoop: iter ${iteration} failed (exit ${result.exitCode})`, {
+            chunkId,
+            exitCode: result.exitCode,
+            ...(stderrExcerpt && { stderr: stderrExcerpt }),
+            ...(stdoutExcerpt && { stdout: stdoutExcerpt }),
+          });
         }
         // Create iteration span
         const iterSpan = this.observer.startSpan(this.observer.trace, {
@@ -342,21 +350,30 @@ export class CliSkillExecutor {
       };
     }
 
-    // Success
     const postTokens = this.observer.counter.grandTotal();
+    const chunkTokensUsed = postTokens.totalTokens - preTokens.totalTokens;
     this.observer.setMetadata(chunkSpan, {
       iterations: ralphResult.iterations,
       completed: ralphResult.completed,
       merged: mergeResult.merged,
       commits: mergeResult.commits,
     });
-    this.observer.endSpan(chunkSpan, {
-      status: ralphResult.completed ? 'completed' : 'error',
-    });
 
+    if (!ralphResult.completed) {
+      const errorMsg = `RalphLoop did not complete for chunk "${chunkId}" after ${ralphResult.iterations} iterations (no promise tag detected)`;
+      this.logger?.error('CliSkillExecutor: chunk failed — promise not detected', {
+        chunkId,
+        iterations: ralphResult.iterations,
+        tokensUsed: chunkTokensUsed,
+      });
+      this.observer.endSpan(chunkSpan, { status: 'error', errorMessage: errorMsg });
+      throw new Error(errorMsg);
+    }
+
+    this.observer.endSpan(chunkSpan, { status: 'completed' });
     return {
       output: ralphResult.output,
-      tokensUsed: postTokens.totalTokens - preTokens.totalTokens,
+      tokensUsed: chunkTokensUsed,
     };
   }
 

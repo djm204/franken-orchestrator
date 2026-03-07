@@ -178,6 +178,7 @@ describe('RalphLoop', () => {
         '--verbose',
         '--disable-slash-commands',
         '--no-session-persistence',
+        '--plugin-dir', '/dev/null',
         '--max-turns', '10',
         '--', 'Implement feature X',
       ],

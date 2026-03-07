@@ -172,7 +172,7 @@ describe('CliSkillExecutor', () => {
   });
 
   describe('failed execution (max iterations)', () => {
-    it('returns SkillResult with output when ralph loop does not complete', async () => {
+    it('throws when ralph loop does not complete', async () => {
       ralph.run.mockResolvedValue({
         completed: false,
         iterations: 5,
@@ -180,10 +180,9 @@ describe('CliSkillExecutor', () => {
         tokensUsed: 500,
       });
 
-      const result = await createAndExecute();
-
-      expect(result.output).toBe('partial output');
-      expect(result.tokensUsed).toBeDefined();
+      await expect(createAndExecute()).rejects.toThrow(
+        /RalphLoop did not complete.*after 5 iterations.*no promise tag detected/,
+      );
     });
   });
 
