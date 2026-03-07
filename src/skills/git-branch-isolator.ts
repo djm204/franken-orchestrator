@@ -30,10 +30,19 @@ export class GitBranchIsolator {
   isolate(chunkId: string): void {
     assertSafeId(chunkId);
     const branch = this.branchName(chunkId);
-    this.git(`checkout ${this.config.baseBranch}`);
+    try {
+      this.git(`checkout ${this.config.baseBranch}`);
+    } catch {
+      // Force checkout if untracked files conflict (e.g. .build/ artifacts)
+      this.git(`checkout --force ${this.config.baseBranch}`);
+    }
     const exists = this.git(`branch --list ${branch}`);
     if (exists.length > 0) {
-      this.git(`checkout ${branch}`);
+      try {
+        this.git(`checkout ${branch}`);
+      } catch {
+        this.git(`checkout --force ${branch}`);
+      }
       return;
     }
     this.git(`checkout -b ${branch}`);
@@ -65,7 +74,11 @@ export class GitBranchIsolator {
       return { merged: false, commits: 0 };
     }
 
-    this.git(`checkout ${this.config.baseBranch}`);
+    try {
+      this.git(`checkout ${this.config.baseBranch}`);
+    } catch {
+      this.git(`checkout --force ${this.config.baseBranch}`);
+    }
     try {
       if (commitMessage) {
         const safeMsg = commitMessage.replace(/"/g, '\\"');
