@@ -3,6 +3,7 @@ import { BeastLogger } from '../logging/beast-logger.js';
 import { RalphLoop } from '../skills/ralph-loop.js';
 import { GitBranchIsolator } from '../skills/git-branch-isolator.js';
 import { CliSkillExecutor } from '../skills/cli-skill-executor.js';
+import { CliLlmAdapter } from '../adapters/cli-llm-adapter.js';
 import { FileCheckpointStore } from '../checkpoint/file-checkpoint-store.js';
 import { PrCreator } from '../closure/pr-creator.js';
 import type {
@@ -24,6 +25,7 @@ export interface CliDepOptions {
 
 export interface CliDeps {
   deps: BeastLoopDeps;
+  cliLlmAdapter: CliLlmAdapter;
   logger: BeastLogger;
   finalize: () => Promise<void>;
 }
@@ -133,6 +135,11 @@ export function createCliDeps(options: CliDepOptions): CliDeps {
     autoCommit: true,
     workingDir: paths.root,
   });
+  const cliLlmAdapter = new CliLlmAdapter({
+    provider: options.provider,
+    workingDir: paths.root,
+  });
+
   const cliExecutor = new CliSkillExecutor(
     ralph, gitIso, createStubObserverDeps() as never,
   );
@@ -166,5 +173,5 @@ export function createCliDeps(options: CliDepOptions): CliDeps {
     ...(prCreator ? { prCreator } : {}),
   };
 
-  return { deps, logger, finalize };
+  return { deps, cliLlmAdapter, logger, finalize };
 }

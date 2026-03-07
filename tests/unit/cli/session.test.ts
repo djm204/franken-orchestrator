@@ -36,11 +36,26 @@ const mockDeps = {
   },
 };
 
+const mockCliLlmAdapter = {
+  transformRequest: vi.fn((r: unknown) => r),
+  execute: vi.fn(async () => ''),
+  transformResponse: vi.fn(() => ({ content: 'mock response' })),
+  validateCapabilities: vi.fn(() => true),
+  config: {
+    provider: 'claude',
+    claudeCmd: 'claude',
+    codexCmd: 'codex',
+    workingDir: '/tmp',
+    timeoutMs: 120_000,
+  },
+};
+
 vi.mock('../../../src/cli/dep-factory.js', () => ({
   createCliDeps: vi.fn(() => ({
     deps: mockDeps,
     logger: mockDeps.logger,
     finalize: mockFinalize,
+    cliLlmAdapter: mockCliLlmAdapter,
   })),
 }));
 

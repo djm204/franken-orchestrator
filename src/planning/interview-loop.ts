@@ -1,7 +1,6 @@
 import type { ILlmClient } from '@franken/types';
 import type { PlanGraph, PlanIntent } from '../deps.js';
 import type { GraphBuilder } from './chunk-file-graph-builder.js';
-import type { LlmGraphBuilder } from './llm-graph-builder.js';
 
 /**
  * IO abstraction for user interaction during interviews.
@@ -26,7 +25,7 @@ export class InterviewLoop implements GraphBuilder {
   constructor(
     private readonly llm: ILlmClient,
     private readonly io: InterviewIO,
-    private readonly graphBuilder: LlmGraphBuilder,
+    private readonly graphBuilder: GraphBuilder,
   ) {}
 
   async build(intent: PlanIntent): Promise<PlanGraph> {

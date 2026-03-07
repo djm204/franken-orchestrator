@@ -65,10 +65,10 @@ export class Session {
 
   private async runInterview(): Promise<void> {
     const { paths, io } = this.config;
-    const { deps } = createCliDeps(this.buildDepOptions());
+    const { cliLlmAdapter } = createCliDeps(this.buildDepOptions());
 
-    // Create LLM client from CLI executor adapter
-    const adapterLlm = new AdapterLlmClient(deps.cliExecutor as never);
+    // Create LLM client from CLI LLM adapter
+    const adapterLlm = new AdapterLlmClient(cliLlmAdapter);
 
     // We use InterviewLoop with a capturing graph builder to intercept the
     // design doc before it gets decomposed. The InterviewLoop's internal flow
@@ -83,7 +83,7 @@ export class Session {
       },
     };
 
-    const capturingInterview = new InterviewLoop(adapterLlm, io, capturingGraphBuilder as never);
+    const capturingInterview = new InterviewLoop(adapterLlm, io, capturingGraphBuilder);
     await capturingInterview.build({ goal: 'Gather requirements' });
 
     // Write design doc
@@ -107,7 +107,7 @@ export class Session {
 
   private async runPlan(): Promise<void> {
     const { paths, io, designDocPath } = this.config;
-    const { deps } = createCliDeps(this.buildDepOptions());
+    const { cliLlmAdapter } = createCliDeps(this.buildDepOptions());
 
     // Load design doc
     let designContent: string;
@@ -121,7 +121,7 @@ export class Session {
       designContent = stored;
     }
 
-    const adapterLlm = new AdapterLlmClient(deps.cliExecutor as never);
+    const adapterLlm = new AdapterLlmClient(cliLlmAdapter);
     const llmGraphBuilder = new LlmGraphBuilder(adapterLlm);
 
     io.display('Decomposing design into implementation chunks...\n');
