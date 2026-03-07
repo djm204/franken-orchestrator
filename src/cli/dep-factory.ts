@@ -4,11 +4,12 @@ import { RalphLoop } from '../skills/ralph-loop.js';
 import { GitBranchIsolator } from '../skills/git-branch-isolator.js';
 import { CliSkillExecutor } from '../skills/cli-skill-executor.js';
 import { CliLlmAdapter } from '../adapters/cli-llm-adapter.js';
+import { CliObserverBridge } from '../adapters/cli-observer-bridge.js';
 import { FileCheckpointStore } from '../checkpoint/file-checkpoint-store.js';
 import { PrCreator } from '../closure/pr-creator.js';
 import type {
   BeastLoopDeps, IFirewallModule, ISkillsModule, IMemoryModule,
-  IPlannerModule, IObserverModule, ICritiqueModule, IGovernorModule,
+  IPlannerModule, ICritiqueModule, IGovernorModule,
   IHeartbeatModule,
 } from '../deps.js';
 import type { ProjectPaths } from './project-root.js';
@@ -26,6 +27,7 @@ export interface CliDepOptions {
 export interface CliDeps {
   deps: BeastLoopDeps;
   cliLlmAdapter: CliLlmAdapter;
+  observerBridge: CliObserverBridge;
   logger: BeastLogger;
   finalize: () => Promise<void>;
 }
@@ -72,45 +74,6 @@ function createStubSkills(planDir: string): ISkillsModule {
   };
 }
 
-// ── Stub observer (no franken-observer dependency) ──
-
-function createStubObserver(): IObserverModule {
-  return {
-    startTrace: () => {},
-    startSpan: () => ({ end: () => {} }),
-    getTokenSpend: async () => ({
-      inputTokens: 0,
-      outputTokens: 0,
-      totalTokens: 0,
-      estimatedCostUsd: 0,
-    }),
-  };
-}
-
-function createStubObserverDeps() {
-  const counter = {
-    grandTotal: () => ({ promptTokens: 0, completionTokens: 0, totalTokens: 0 }),
-    allModels: () => [] as string[],
-    totalsFor: () => ({ promptTokens: 0, completionTokens: 0, totalTokens: 0 }),
-  };
-  const costCalc = { totalCost: () => 0 };
-  const breaker = { check: () => ({ tripped: false, limitUsd: 0, spendUsd: 0 }) };
-  const loopDet = { check: () => ({ detected: false }) };
-  const trace = { id: 'stub-trace' };
-
-  return {
-    trace,
-    counter,
-    costCalc,
-    breaker,
-    loopDetector: loopDet,
-    startSpan: () => ({ id: 'stub-span' }),
-    endSpan: () => {},
-    recordTokenUsage: () => {},
-    setMetadata: () => {},
-  };
-}
-
 export function createCliDeps(options: CliDepOptions): CliDeps {
   const { paths, baseBranch, budget, verbose, noPr, reset } = options;
 
@@ -124,7 +87,8 @@ export function createCliDeps(options: CliDepOptions): CliDeps {
   const logger = new BeastLogger({ verbose, captureForFile: true });
 
   // Observer
-  const observer = createStubObserver();
+  const observerBridge = new CliObserverBridge({ budgetLimitUsd: budget });
+  observerBridge.startTrace(`cli-session-${Date.now()}`);
 
   // CLI execution stack
   const checkpoint = new FileCheckpointStore(paths.checkpointFile);
@@ -141,7 +105,7 @@ export function createCliDeps(options: CliDepOptions): CliDeps {
   });
 
   const cliExecutor = new CliSkillExecutor(
-    ralph, gitIso, createStubObserverDeps() as never,
+    ralph, gitIso, observerBridge.observerDeps,
   );
 
   // PR creator
@@ -162,7 +126,7 @@ export function createCliDeps(options: CliDepOptions): CliDeps {
     skills: createStubSkills(paths.plansDir),
     memory: stubMemory,
     planner: stubPlanner,
-    observer,
+    observer: observerBridge,
     critique: stubCritique,
     governor: stubGovernor,
     heartbeat: stubHeartbeat,
@@ -173,5 +137,5 @@ export function createCliDeps(options: CliDepOptions): CliDeps {
     ...(prCreator ? { prCreator } : {}),
   };
 
-  return { deps, cliLlmAdapter, logger, finalize };
+  return { deps, cliLlmAdapter, observerBridge, logger, finalize };
 }

@@ -11,7 +11,7 @@ export default defineConfig({
       ? ['tests/e2e/**/*.test.ts']
       : isIntegration
         ? ['tests/integration/**/*.test.ts']
-        : ['tests/unit/**/*.test.ts'],
+        : ['tests/unit/**/*.test.ts', 'test/**/*.test.ts'],
     exclude: isE2e
       ? []
       : isIntegration
