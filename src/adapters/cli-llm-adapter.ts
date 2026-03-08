@@ -1,13 +1,6 @@
 import { spawn as nodeSpawn, type ChildProcess, type SpawnOptions } from 'node:child_process';
 import type { IAdapter } from './adapter-llm-client.js';
-
-export interface CliLlmAdapterConfig {
-  provider: 'claude' | 'codex';
-  claudeCmd: string;
-  codexCmd: string;
-  workingDir: string;
-  timeoutMs: number;
-}
+import type { ICliProvider } from '../skills/providers/cli-provider.js';
 
 type CliTransformed = { prompt: string; maxTurns: number };
 
@@ -47,20 +40,27 @@ function tryExtractTextFromNode(node: unknown, out: string[]): void {
   }
 }
 
+export interface CliLlmAdapterOpts {
+  workingDir: string;
+  timeoutMs?: number;
+  commandOverride?: string;
+}
+
 export class CliLlmAdapter implements IAdapter {
-  readonly config: Required<CliLlmAdapterConfig>;
+  private readonly provider: ICliProvider;
+  private readonly opts: { workingDir: string; timeoutMs: number; commandOverride?: string };
   private readonly _spawn: SpawnFn;
 
   constructor(
-    config: Partial<CliLlmAdapterConfig> & Pick<CliLlmAdapterConfig, 'provider' | 'workingDir'>,
+    provider: ICliProvider,
+    opts: CliLlmAdapterOpts,
     _spawnFn?: SpawnFn,
   ) {
-    this.config = {
-      provider: config.provider,
-      claudeCmd: config.claudeCmd ?? 'claude',
-      codexCmd: config.codexCmd ?? 'codex',
-      workingDir: config.workingDir,
-      timeoutMs: config.timeoutMs ?? 120_000,
+    this.provider = provider;
+    this.opts = {
+      workingDir: opts.workingDir,
+      timeoutMs: opts.timeoutMs ?? 120_000,
+      ...(opts.commandOverride !== undefined ? { commandOverride: opts.commandOverride } : {}),
     };
     this._spawn = _spawnFn ?? (nodeSpawn as SpawnFn);
   }
@@ -76,33 +76,21 @@ export class CliLlmAdapter implements IAdapter {
 
   async execute(providerRequest: unknown): Promise<string> {
     const { prompt, maxTurns } = providerRequest as CliTransformed;
-    const cmd = this.config.provider === 'claude'
-      ? this.config.claudeCmd
-      : this.config.codexCmd;
+    const cmd = this.opts.commandOverride ?? this.provider.command;
 
-    const args = [
-      '--print',
-      '--dangerously-skip-permissions',
-      '--output-format', 'stream-json',
-      '--verbose',
-      prompt,
-      '--max-turns', String(maxTurns),
-      '--plugin-dir', '/dev/null',
-      '--no-session-persistence',
-    ];
+    const args = this.provider.buildArgs({ maxTurns });
+    args.push(prompt);
 
-    const env = { ...process.env };
-    // CRITICAL: Clear ALL CLAUDE* env vars to prevent freeze bug
-    for (const key of Object.keys(env)) {
-      if (key.startsWith('CLAUDE')) {
-        delete env[key];
-      }
+    const rawEnv: Record<string, string> = {};
+    for (const [key, value] of Object.entries(process.env)) {
+      if (value !== undefined) rawEnv[key] = value;
     }
+    const env = this.provider.filterEnv(rawEnv);
 
     return new Promise<string>((resolve, reject) => {
       const child = this._spawn(cmd, args, {
         stdio: ['ignore', 'pipe', 'pipe'],
-        cwd: this.config.workingDir,
+        cwd: this.opts.workingDir,
         env,
       });
 
@@ -130,8 +118,8 @@ export class CliLlmAdapter implements IAdapter {
           try { child.kill('SIGKILL'); } catch { /* already dead */ }
         }, 5_000);
         killTimer.unref();
-        settle(() => reject(new Error(`CLI timeout after ${this.config.timeoutMs}ms`)));
-      }, this.config.timeoutMs);
+        settle(() => reject(new Error(`CLI timeout after ${this.opts.timeoutMs}ms`)));
+      }, this.opts.timeoutMs);
 
       child.on('close', (code) => {
         clearTimeout(timer);
@@ -155,7 +143,20 @@ export class CliLlmAdapter implements IAdapter {
       return { content: '' };
     }
 
-    // Parse stream-json: newline-delimited JSON events
+    if (this.provider.supportsStreamJson()) {
+      return this.parseStreamJson(raw);
+    }
+
+    // Non-stream-json: delegate to provider
+    const normalized = this.provider.normalizeOutput(raw);
+    return { content: normalized || raw };
+  }
+
+  validateCapabilities(feature: string): boolean {
+    return feature === 'text-completion';
+  }
+
+  private parseStreamJson(raw: string): { content: string | null } {
     const lines = raw.split('\n').map((l) => l.trim()).filter((l) => l.length > 0);
     const extracted: string[] = [];
     let parsedJsonLines = 0;
@@ -175,9 +176,5 @@ export class CliLlmAdapter implements IAdapter {
     if (extracted.length === 0) return { content: raw };
 
     return { content: extracted.join('') };
-  }
-
-  validateCapabilities(feature: string): boolean {
-    return feature === 'text-completion';
   }
 }

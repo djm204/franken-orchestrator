@@ -5,6 +5,8 @@ import { RalphLoop } from '../skills/ralph-loop.js';
 import { GitBranchIsolator } from '../skills/git-branch-isolator.js';
 import { CliSkillExecutor } from '../skills/cli-skill-executor.js';
 import { CliLlmAdapter } from '../adapters/cli-llm-adapter.js';
+import { ClaudeProvider } from '../skills/providers/claude-provider.js';
+import { CodexProvider } from '../skills/providers/codex-provider.js';
 import { CliObserverBridge } from '../adapters/cli-observer-bridge.js';
 import { FileCheckpointStore } from '../checkpoint/file-checkpoint-store.js';
 import { PrCreator } from '../closure/pr-creator.js';
@@ -122,9 +124,8 @@ export async function createCliDeps(options: CliDepOptions): Promise<CliDeps> {
     autoCommit: true,
     workingDir: paths.root,
   });
-  const cliLlmAdapter = new CliLlmAdapter({
-    // Cast until cli-llm-adapter.ts is refactored in chunk 04-05
-    provider: options.provider as 'claude' | 'codex',
+  const cliProvider = options.provider === 'codex' ? new CodexProvider() : new ClaudeProvider();
+  const cliLlmAdapter = new CliLlmAdapter(cliProvider, {
     workingDir: paths.root,
   });
 
