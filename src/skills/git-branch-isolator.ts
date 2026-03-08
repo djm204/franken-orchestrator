@@ -96,24 +96,36 @@ export class GitBranchIsolator {
   isolate(chunkId: string): void {
     assertSafeId(chunkId);
     const branch = this.branchName(chunkId);
-    try {
-      this.safeCheckout(this.config.baseBranch);
-    } catch (err) {
-      const msg = String(err);
-      if (msg.includes('resolve your current index') || msg.includes('Unmerged')) {
-        // Leftover merge state from a previous chunk — clean up and retry
-        this.abortMerge();
-        this.safeCheckout(this.config.baseBranch);
-      } else {
-        throw err;
-      }
-    }
+    this.ensureBranch(this.config.baseBranch);
     const exists = this.git(`branch --list ${branch}`);
     if (exists.length > 0) {
       this.safeCheckout(branch);
       return;
     }
     this.git(`checkout -b ${branch}`);
+  }
+
+  /**
+   * Ensure a branch exists and check it out.
+   * If the branch doesn't exist locally, create it from current HEAD.
+   */
+  private ensureBranch(branchName: string): void {
+    const exists = this.git(`branch --list ${branchName}`);
+    if (exists.length === 0) {
+      this.git(`checkout -b ${branchName}`);
+      return;
+    }
+    try {
+      this.safeCheckout(branchName);
+    } catch (err) {
+      const msg = String(err);
+      if (msg.includes('resolve your current index') || msg.includes('Unmerged')) {
+        this.abortMerge();
+        this.safeCheckout(branchName);
+      } else {
+        throw err;
+      }
+    }
   }
 
   autoCommit(chunkId: string, stage: string, iteration: number): boolean {

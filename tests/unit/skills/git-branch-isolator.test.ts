@@ -32,11 +32,16 @@ describe('GitBranchIsolator', () => {
   describe('isolate()', () => {
     it('creates a new branch from baseBranch and checks it out', () => {
       mockExecSync.mockImplementation((cmd: string) => {
+        if (cmd === 'git branch --list main') return '  main\n';
         if (cmd === 'git branch --list chunk/03_my_chunk') return '';
         return '';
       });
       isolator.isolate('03_my_chunk');
 
+      expect(mockExecSync).toHaveBeenCalledWith(
+        'git branch --list main',
+        expect.objectContaining({ cwd: '/fake/repo' }),
+      );
       expect(mockExecSync).toHaveBeenCalledWith(
         'git checkout main',
         expect.objectContaining({ cwd: '/fake/repo' }),
@@ -54,6 +59,7 @@ describe('GitBranchIsolator', () => {
     it('recovers from dirty index (leftover merge) and retries checkout', () => {
       let checkoutAttempts = 0;
       mockExecSync.mockImplementation((cmd: string) => {
+        if (cmd === 'git branch --list main') return '  main\n';
         if (cmd === 'git checkout main') {
           checkoutAttempts++;
           if (checkoutAttempts === 1) {
@@ -75,11 +81,46 @@ describe('GitBranchIsolator', () => {
       );
     });
 
+    it('creates baseBranch from current HEAD when it does not exist', () => {
+      mockExecSync.mockImplementation((cmd: string) => {
+        if (cmd === 'git branch --list feat/monorepo-migration') return '';
+        if (cmd === 'git branch --list chunk/03_my_chunk') return '';
+        return '';
+      });
+
+      const iso = new GitBranchIsolator(makeConfig({ baseBranch: 'feat/monorepo-migration' }));
+      iso.isolate('03_my_chunk');
+
+      expect(mockExecSync).toHaveBeenCalledWith(
+        'git checkout -b feat/monorepo-migration',
+        expect.objectContaining({ cwd: '/fake/repo' }),
+      );
+      expect(mockExecSync).toHaveBeenCalledWith(
+        'git checkout -b chunk/03_my_chunk',
+        expect.objectContaining({ cwd: '/fake/repo' }),
+      );
+    });
+
+    it('checks out existing baseBranch when it already exists', () => {
+      mockExecSync.mockImplementation((cmd: string) => {
+        if (cmd === 'git branch --list main') return '  main\n';
+        if (cmd === 'git branch --list chunk/03_my_chunk') return '';
+        return '';
+      });
+      isolator.isolate('03_my_chunk');
+
+      expect(mockExecSync).toHaveBeenCalledWith(
+        'git checkout main',
+        expect.objectContaining({ cwd: '/fake/repo' }),
+      );
+    });
+
     it('checks out existing branch when it already exists', () => {
-      mockExecSync
-        .mockReturnValueOnce('') // git checkout main
-        .mockReturnValueOnce('  chunk/03_my_chunk\n') // git branch --list
-        .mockReturnValueOnce(''); // git checkout (existing)
+      mockExecSync.mockImplementation((cmd: string) => {
+        if (cmd === 'git branch --list main') return '  main\n';
+        if (cmd === 'git branch --list chunk/03_my_chunk') return '  chunk/03_my_chunk\n';
+        return '';
+      });
 
       isolator.isolate('03_my_chunk');
 
