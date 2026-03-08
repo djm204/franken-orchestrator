@@ -219,6 +219,157 @@ describe('StreamLineBuffer — garbled stream-json', () => {
   });
 });
 
+// ── StreamLineBuffer — tool use summarization ──
+
+describe('StreamLineBuffer — tool use summarization', () => {
+  it('emits dimmed summary for Read tool instead of file contents', () => {
+    const buffer = new StreamLineBuffer();
+    const frames = [
+      JSON.stringify({ type: 'content_block_start', index: 1, content_block: { type: 'tool_use', id: 'tu_1', name: 'Read' } }),
+      JSON.stringify({ type: 'content_block_delta', index: 1, delta: { type: 'input_json_delta', partial_json: '{"file_' } }),
+      JSON.stringify({ type: 'content_block_delta', index: 1, delta: { type: 'input_json_delta', partial_json: 'path": "/src/foo.ts"}' } }),
+      JSON.stringify({ type: 'content_block_stop', index: 1 }),
+    ].join('\n') + '\n';
+
+    const result = buffer.push(frames);
+    expect(result).toHaveLength(1);
+    expect(result[0]).toContain('Read');
+    expect(result[0]).toContain('foo.ts');
+    // Should be dimmed
+    expect(result[0]).toContain('\x1b[2m');
+  });
+
+  it('emits dimmed summary for Edit tool with file path', () => {
+    const buffer = new StreamLineBuffer();
+    const frames = [
+      JSON.stringify({ type: 'content_block_start', index: 2, content_block: { type: 'tool_use', id: 'tu_2', name: 'Edit' } }),
+      JSON.stringify({ type: 'content_block_delta', index: 2, delta: { type: 'input_json_delta', partial_json: '{"file_path": "/src/bar.ts", "old_string": "x", "new_string": "y"}' } }),
+      JSON.stringify({ type: 'content_block_stop', index: 2 }),
+    ].join('\n') + '\n';
+
+    const result = buffer.push(frames);
+    expect(result).toHaveLength(1);
+    expect(result[0]).toContain('Edit');
+    expect(result[0]).toContain('bar.ts');
+  });
+
+  it('emits dimmed summary for Write tool with file path', () => {
+    const buffer = new StreamLineBuffer();
+    const frames = [
+      JSON.stringify({ type: 'content_block_start', index: 3, content_block: { type: 'tool_use', id: 'tu_3', name: 'Write' } }),
+      JSON.stringify({ type: 'content_block_delta', index: 3, delta: { type: 'input_json_delta', partial_json: '{"file_path": "/src/new-file.ts", "content": "export const x = 1;"}' } }),
+      JSON.stringify({ type: 'content_block_stop', index: 3 }),
+    ].join('\n') + '\n';
+
+    const result = buffer.push(frames);
+    expect(result).toHaveLength(1);
+    expect(result[0]).toContain('Write');
+    expect(result[0]).toContain('new-file.ts');
+  });
+
+  it('emits Bash tool summary with truncated command', () => {
+    const buffer = new StreamLineBuffer();
+    const frames = [
+      JSON.stringify({ type: 'content_block_start', index: 4, content_block: { type: 'tool_use', id: 'tu_4', name: 'Bash' } }),
+      JSON.stringify({ type: 'content_block_delta', index: 4, delta: { type: 'input_json_delta', partial_json: '{"command": "npm run build"}' } }),
+      JSON.stringify({ type: 'content_block_stop', index: 4 }),
+    ].join('\n') + '\n';
+
+    const result = buffer.push(frames);
+    expect(result).toHaveLength(1);
+    expect(result[0]).toContain('Bash');
+    expect(result[0]).toContain('npm run build');
+  });
+
+  it('emits Glob/Grep tool summary with pattern', () => {
+    const buffer = new StreamLineBuffer();
+    const frames = [
+      JSON.stringify({ type: 'content_block_start', index: 5, content_block: { type: 'tool_use', id: 'tu_5', name: 'Glob' } }),
+      JSON.stringify({ type: 'content_block_delta', index: 5, delta: { type: 'input_json_delta', partial_json: '{"pattern": "**/*.test.ts"}' } }),
+      JSON.stringify({ type: 'content_block_stop', index: 5 }),
+    ].join('\n') + '\n';
+
+    const result = buffer.push(frames);
+    expect(result).toHaveLength(1);
+    expect(result[0]).toContain('Glob');
+    expect(result[0]).toContain('**/*.test.ts');
+  });
+
+  it('suppresses tool_result content blocks', () => {
+    const buffer = new StreamLineBuffer();
+    const frames = [
+      // Tool use start + input + stop
+      JSON.stringify({ type: 'content_block_start', index: 1, content_block: { type: 'tool_use', id: 'tu_1', name: 'Read' } }),
+      JSON.stringify({ type: 'content_block_delta', index: 1, delta: { type: 'input_json_delta', partial_json: '{"file_path": "/src/foo.ts"}' } }),
+      JSON.stringify({ type: 'content_block_stop', index: 1 }),
+      // Tool result (the actual file content — should be suppressed)
+      JSON.stringify({ type: 'content_block_start', index: 2, content_block: { type: 'tool_result', tool_use_id: 'tu_1' } }),
+      JSON.stringify({ type: 'content_block_delta', index: 2, delta: { type: 'text_delta', text: 'export const x = 1;\nexport const y = 2;\n// lots of content...' } }),
+      JSON.stringify({ type: 'content_block_stop', index: 2 }),
+    ].join('\n') + '\n';
+
+    const result = buffer.push(frames);
+    // Should only have the tool summary, not the file content
+    expect(result).toHaveLength(1);
+    expect(result[0]).toContain('Read');
+    expect(result.join('')).not.toContain('export const x');
+  });
+
+  it('does not suppress regular text blocks', () => {
+    const buffer = new StreamLineBuffer();
+    const frames = [
+      // Tool use
+      JSON.stringify({ type: 'content_block_start', index: 1, content_block: { type: 'tool_use', id: 'tu_1', name: 'Read' } }),
+      JSON.stringify({ type: 'content_block_delta', index: 1, delta: { type: 'input_json_delta', partial_json: '{"file_path": "/src/foo.ts"}' } }),
+      JSON.stringify({ type: 'content_block_stop', index: 1 }),
+      // Regular text (assistant talking)
+      JSON.stringify({ type: 'content_block_start', index: 3, content_block: { type: 'text', text: '' } }),
+      JSON.stringify({ type: 'content_block_delta', index: 3, delta: { type: 'text_delta', text: 'I found the issue.' } }),
+      JSON.stringify({ type: 'content_block_stop', index: 3 }),
+    ].join('\n') + '\n';
+
+    const result = buffer.push(frames);
+    expect(result).toContain('I found the issue.');
+  });
+
+  it('handles unknown tool names gracefully', () => {
+    const buffer = new StreamLineBuffer();
+    const frames = [
+      JSON.stringify({ type: 'content_block_start', index: 1, content_block: { type: 'tool_use', id: 'tu_1', name: 'SomeNewTool' } }),
+      JSON.stringify({ type: 'content_block_delta', index: 1, delta: { type: 'input_json_delta', partial_json: '{"foo": "bar"}' } }),
+      JSON.stringify({ type: 'content_block_stop', index: 1 }),
+    ].join('\n') + '\n';
+
+    const result = buffer.push(frames);
+    expect(result).toHaveLength(1);
+    expect(result[0]).toContain('SomeNewTool');
+  });
+
+  it('handles partial JSON across multiple pushes', () => {
+    const buffer = new StreamLineBuffer();
+
+    // First push: tool_use start
+    const r1 = buffer.push(
+      JSON.stringify({ type: 'content_block_start', index: 1, content_block: { type: 'tool_use', id: 'tu_1', name: 'Read' } }) + '\n'
+    );
+    expect(r1).toEqual([]);
+
+    // Second push: input delta
+    const r2 = buffer.push(
+      JSON.stringify({ type: 'content_block_delta', index: 1, delta: { type: 'input_json_delta', partial_json: '{"file_path": "/src/x.ts"}' } }) + '\n'
+    );
+    expect(r2).toEqual([]);
+
+    // Third push: stop
+    const r3 = buffer.push(
+      JSON.stringify({ type: 'content_block_stop', index: 1 }) + '\n'
+    );
+    expect(r3).toHaveLength(1);
+    expect(r3[0]).toContain('Read');
+    expect(r3[0]).toContain('x.ts');
+  });
+});
+
 // ── formatIterationProgress ──
 
 describe('formatIterationProgress', () => {

@@ -150,12 +150,47 @@ export function processStreamLine(line: string): string {
 }
 
 /**
+ * Summarize a tool use invocation as a compact, dimmed one-liner.
+ * Extracts the most useful parameter (file_path, command, pattern) from the
+ * accumulated JSON input fragments.
+ */
+function summarizeToolUse(toolName: string, inputJson: string): string {
+  let detail = '';
+  try {
+    const input = JSON.parse(inputJson) as Record<string, unknown>;
+    if (typeof input.file_path === 'string') {
+      // Show just the basename for brevity
+      const parts = (input.file_path as string).split('/');
+      detail = parts[parts.length - 1] || input.file_path as string;
+    } else if (typeof input.command === 'string') {
+      const cmd = input.command as string;
+      detail = cmd.length > 60 ? cmd.slice(0, 57) + '...' : cmd;
+    } else if (typeof input.pattern === 'string') {
+      detail = input.pattern as string;
+    }
+  } catch {
+    // Partial / malformed JSON — just show the tool name
+  }
+  const label = detail ? `${toolName} ${detail}` : toolName;
+  return `\x1b[2m[tool] ${label}\x1b[0m`;
+}
+
+/**
  * Line-buffered processor for stream-json output.
  * Accumulates bytes until newline, then processes each complete line
  * through processStreamLine. Partial lines are held until completed.
+ *
+ * Tracks tool-use blocks: when a `content_block_start` with `type: "tool_use"`
+ * is seen, subsequent `input_json_delta` frames are accumulated silently and a
+ * compact summary is emitted on `content_block_stop`. Tool-result blocks are
+ * suppressed entirely to avoid dumping file contents to the terminal.
  */
 export class StreamLineBuffer {
   private buffer = '';
+  /** Active tool-use block state, keyed by content_block index. */
+  private activeToolUse: { index: number; name: string; inputJson: string } | null = null;
+  /** Set of content_block indices that are tool_result blocks (suppressed). */
+  private suppressedIndices = new Set<number>();
 
   /** Push raw data. Returns array of clean text strings (empty entries filtered out). */
   push(data: string): string[] {
@@ -165,9 +200,9 @@ export class StreamLineBuffer {
 
     const results: string[] = [];
     for (const line of lines) {
-      const processed = processStreamLine(line);
-      if (processed.length > 0) {
-        results.push(processed);
+      const result = this.processLine(line);
+      if (result !== null && result.length > 0) {
+        results.push(result);
       }
     }
     return results;
@@ -182,6 +217,70 @@ export class StreamLineBuffer {
     const text = this.buffer.trim();
     this.buffer = '';
     return [text];
+  }
+
+  /** Process a single line with tool-use state tracking. Returns null to suppress output. */
+  private processLine(line: string): string | null {
+    const trimmed = line.trim();
+    if (trimmed.length === 0) return '';
+
+    let obj: Record<string, unknown> | null = null;
+    try {
+      obj = JSON.parse(trimmed) as Record<string, unknown>;
+    } catch {
+      // Not JSON — pass through as plain text
+      return trimmed;
+    }
+
+    const eventType = obj.type as string | undefined;
+    const index = typeof obj.index === 'number' ? obj.index : -1;
+
+    // ── content_block_start ──
+    if (eventType === 'content_block_start') {
+      const block = obj.content_block as Record<string, unknown> | undefined;
+      if (block?.type === 'tool_use' && typeof block.name === 'string') {
+        this.activeToolUse = { index, name: block.name as string, inputJson: '' };
+        return null;
+      }
+      if (block?.type === 'tool_result') {
+        this.suppressedIndices.add(index);
+        return null;
+      }
+      return ''; // text block start — no visible output
+    }
+
+    // ── content_block_delta ──
+    if (eventType === 'content_block_delta') {
+      // Inside a tool_use block — accumulate input JSON
+      if (this.activeToolUse && index === this.activeToolUse.index) {
+        const delta = obj.delta as Record<string, unknown> | undefined;
+        if (delta?.type === 'input_json_delta' && typeof delta.partial_json === 'string') {
+          this.activeToolUse.inputJson += delta.partial_json;
+        }
+        return null;
+      }
+      // Inside a tool_result block — suppress
+      if (this.suppressedIndices.has(index)) {
+        return null;
+      }
+    }
+
+    // ── content_block_stop ──
+    if (eventType === 'content_block_stop') {
+      if (this.activeToolUse && index === this.activeToolUse.index) {
+        const summary = summarizeToolUse(this.activeToolUse.name, this.activeToolUse.inputJson);
+        this.activeToolUse = null;
+        return summary;
+      }
+      if (this.suppressedIndices.has(index)) {
+        this.suppressedIndices.delete(index);
+        return null;
+      }
+      return '';
+    }
+
+    // Fall through to default processing
+    return processStreamLine(line);
   }
 }
 
