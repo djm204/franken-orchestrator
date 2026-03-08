@@ -149,6 +149,25 @@ describe('PrCreator', () => {
     expect(createCmd).toContain('01_checkpoint_store');
   });
 
+  it('skips when current branch equals target branch', async () => {
+    const exec = mockExec({
+      'git branch --show-current': 'main\n',
+    });
+    const creator = new PrCreator({ targetBranch: 'main', disabled: false, remote: 'origin' }, exec);
+    const logger = makeLogger();
+
+    const result = await creator.create(baseResult, logger);
+
+    expect(result).toBeNull();
+    expect(logger.warn).toHaveBeenCalledWith(
+      expect.stringContaining('same as target'),
+      expect.anything(),
+    );
+    // Should not attempt to push or create PR
+    expect(exec).not.toHaveBeenCalledWith(expect.stringContaining('git push'), expect.anything());
+    expect(exec).not.toHaveBeenCalledWith(expect.stringContaining('gh pr create'), expect.anything());
+  });
+
   it('skips when PR already exists', async () => {
     const exec = mockExec({
       'gh pr list': '[{"url":"https://example.com/pr/99"}]',

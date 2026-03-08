@@ -107,6 +107,11 @@ export class PrCreator {
       return null;
     }
 
+    if (branch === this.config.targetBranch) {
+      logger?.warn('PrCreator: skipped — current branch is same as target', { branch, target: this.config.targetBranch });
+      return null;
+    }
+
     if (!this.pushBranch(branch, logger)) {
       return null;
     }

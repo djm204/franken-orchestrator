@@ -137,7 +137,7 @@ export async function createCliDeps(options: CliDepOptions): Promise<CliDeps> {
 
   // PR creator (wrap adapter as ILlmClient for LLM-powered titles/descriptions)
   const prCreator = noPr ? undefined : new PrCreator(
-    { targetBranch: 'main', disabled: false, remote: 'origin' },
+    { targetBranch: baseBranch, disabled: false, remote: 'origin' },
     undefined,
     adapterLlm,
   );
