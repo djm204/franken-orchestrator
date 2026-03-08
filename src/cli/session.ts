@@ -4,12 +4,15 @@ import { ChunkFileGraphBuilder } from '../planning/chunk-file-graph-builder.js';
 import { LlmGraphBuilder } from '../planning/llm-graph-builder.js';
 import { InterviewLoop } from '../planning/interview-loop.js';
 import { AdapterLlmClient } from '../adapters/adapter-llm-client.js';
+import { ProgressLlmClient } from '../adapters/progress-llm-client.js';
 import { ANSI, budgetBar, statusBadge, logHeader } from '../logging/beast-logger.js';
 import type { InterviewIO } from '../planning/interview-loop.js';
 import type { BeastResult } from '../types.js';
 import type { ProjectPaths } from './project-root.js';
 import { createCliDeps } from './dep-factory.js';
+import { extractDesignSummary, formatDesignCard } from './design-summary.js';
 import { reviewLoop } from './review-loop.js';
+import { isNoOpDesign } from './noop-detector.js';
 import { writeDesignDoc, readDesignDoc, writeChunkFiles } from './file-writer.js';
 import type { ChunkDefinition } from './file-writer.js';
 
@@ -60,7 +63,8 @@ export class Session {
       const phase = phases[i];
 
       if (phase === 'interview') {
-        await this.runInterview();
+        const decision = await this.runInterview();
+        if (decision === 'exit') return undefined;
         if (exitAfter === 'interview') return undefined;
       }
 
@@ -77,18 +81,13 @@ export class Session {
     return undefined;
   }
 
-  private async runInterview(): Promise<void> {
+  private async runInterview(): Promise<'continue' | 'exit'> {
     const { paths, io } = this.config;
     const { cliLlmAdapter } = await createCliDeps(this.buildDepOptions());
 
-    // Create LLM client from CLI LLM adapter
     const adapterLlm = new AdapterLlmClient(cliLlmAdapter);
+    const progressLlm = new ProgressLlmClient(adapterLlm);
 
-    // We use InterviewLoop with a capturing graph builder to intercept the
-    // design doc before it gets decomposed. The InterviewLoop's internal flow
-    // is: gather answers -> generate design doc -> approve -> decompose.
-    // By providing a graph builder that captures instead of decomposing,
-    // we get the design doc and can write it to disk + run the review loop.
     let capturedDesignDoc = '';
     const capturingGraphBuilder = {
       build: async (intent: { goal: string }) => {
@@ -97,26 +96,63 @@ export class Session {
       },
     };
 
-    const capturingInterview = new InterviewLoop(adapterLlm, io, capturingGraphBuilder);
+    const interviewIo: InterviewIO = {
+      ask: async (prompt) => {
+        if (prompt === 'Approve this design? (yes/no)') {
+          return 'yes';
+        }
+        return io.ask(prompt);
+      },
+      display: () => {
+        // Session owns post-interview design presentation.
+      },
+    };
+
+    const capturingInterview = new InterviewLoop(progressLlm, interviewIo, capturingGraphBuilder);
     await capturingInterview.build({ goal: 'Gather requirements' });
 
-    // Write design doc
-    const designPath = writeDesignDoc(paths, capturedDesignDoc);
+    const displayDesignCard = (designDoc: string): string => {
+      const designPath = writeDesignDoc(paths, designDoc);
+      io.display(formatDesignCard({
+        ...extractDesignSummary(designDoc),
+        filePath: designPath,
+      }));
+      return designPath;
+    };
 
-    // Review loop
-    await reviewLoop({
-      filePaths: [designPath],
-      artifactLabel: 'Design document',
-      io,
-      onRevise: async (feedback) => {
-        const revised = await adapterLlm.complete(
+    displayDesignCard(capturedDesignDoc);
+
+    while (true) {
+      const noOp = isNoOpDesign(capturedDesignDoc);
+      const header = noOp
+        ? 'Analysis complete: no implementation changes needed.'
+        : 'Design ready. What next?';
+
+      const choice = await io.ask(
+        `${header}\n\n  [c] Continue to planning phase${noOp ? ' anyway' : ''}\n  [r] Revise - give feedback to regenerate\n  [x] Exit\n`,
+      );
+      const normalized = choice.trim().toLowerCase();
+
+      if (normalized === 'x' || normalized === 'exit') {
+        return 'exit';
+      }
+
+      if (normalized === 'c' || normalized === 'continue') {
+        return 'continue';
+      }
+
+      if (normalized === 'r' || normalized === 'revise') {
+        const feedback = await io.ask('What would you like to change?');
+        const revised = await progressLlm.complete(
           `Revise this design document based on the following feedback:\n\nFeedback: ${feedback}\n\nCurrent document:\n${capturedDesignDoc}`,
         );
         capturedDesignDoc = revised;
-        const path = writeDesignDoc(paths, revised);
-        return [path];
-      },
-    });
+        displayDesignCard(revised);
+        continue;
+      }
+
+      io.display('Please enter c, r, or x.');
+    }
   }
 
   private async runPlan(): Promise<void> {
