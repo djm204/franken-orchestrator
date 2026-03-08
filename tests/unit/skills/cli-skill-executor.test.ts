@@ -173,6 +173,31 @@ describe('CliSkillExecutor', () => {
       expect(result.output).toBe('<promise>IMPL_01_DONE</promise>');
       expect(result.tokensUsed).toBe(300);
     });
+
+    it('uses executor-level provider defaults when execution passes no martin config', async () => {
+      const { CliSkillExecutor } = await import('../../../src/skills/cli-skill-executor.js');
+      const executor = new CliSkillExecutor(
+        martin as any,
+        git as any,
+        observer,
+        undefined,
+        undefined,
+        undefined,
+        {
+          provider: 'codex',
+          providers: ['codex'],
+          command: '/usr/local/bin/codex',
+        },
+      );
+
+      await executor.execute('cli:01_types', makeSkillInput(), {} as never);
+
+      expect(martin.run).toHaveBeenCalledWith(expect.objectContaining({
+        provider: 'codex',
+        providers: ['codex'],
+        command: '/usr/local/bin/codex',
+      }));
+    });
   });
 
   describe('failed execution (max iterations)', () => {

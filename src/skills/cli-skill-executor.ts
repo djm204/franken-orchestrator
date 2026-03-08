@@ -126,6 +126,7 @@ export class BudgetExceededError extends Error {
 // ── CliSkillExecutor ──
 
 type CommitMessageFn = (diffStat: string, objective: string) => Promise<string | null>;
+type DefaultMartinConfig = Pick<MartinLoopConfig, 'provider'> & Partial<Pick<MartinLoopConfig, 'command' | 'providers'>>;
 
 export class CliSkillExecutor {
   private readonly martin: MartinLoop;
@@ -134,6 +135,7 @@ export class CliSkillExecutor {
   private readonly verifyCommand?: string | undefined;
   private readonly commitMessageFn?: CommitMessageFn | undefined;
   private readonly logger?: ILogger | undefined;
+  private readonly defaultMartinConfig: DefaultMartinConfig;
 
   constructor(
     martin: MartinLoop,
@@ -142,6 +144,7 @@ export class CliSkillExecutor {
     verifyCommand?: string,
     commitMessageFn?: CommitMessageFn,
     logger?: ILogger,
+    defaultMartinConfig?: DefaultMartinConfig,
   ) {
     this.martin = martin;
     this.git = git;
@@ -149,6 +152,7 @@ export class CliSkillExecutor {
     this.verifyCommand = verifyCommand;
     this.commitMessageFn = commitMessageFn;
     this.logger = logger;
+    this.defaultMartinConfig = defaultMartinConfig ?? { provider: 'claude', command: 'claude' };
   }
 
   async recoverDirtyFiles(
@@ -227,10 +231,9 @@ export class CliSkillExecutor {
       promiseTag: defaultPromiseTag,
       maxIterations: 10,
       maxTurns: 25,
-      provider: 'claude',
-      command: 'claude',
       timeoutMs: 600_000,
       workingDir: this.git.getWorkingDir(),
+      ...this.defaultMartinConfig,
     };
 
     // Wire onIteration for observer integration

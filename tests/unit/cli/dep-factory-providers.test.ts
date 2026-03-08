@@ -158,4 +158,25 @@ describe('dep-factory provider wiring', () => {
     expect(CliSkillExecutor).toHaveBeenCalled();
     expect(result.deps.cliExecutor).toBeDefined();
   });
+
+  it('passes selected provider defaults to CliSkillExecutor', async () => {
+    const { createCliDeps } = await import('../../../src/cli/dep-factory.js');
+    const opts = makeOpts({
+      provider: 'codex',
+      providers: ['codex'],
+      providersConfig: { codex: { command: '/usr/local/bin/codex' } },
+    });
+
+    await createCliDeps(opts);
+
+    const cliExecutorCall = (await import('../../../src/skills/cli-skill-executor.js')).CliSkillExecutor as unknown as {
+      mock: { calls: unknown[][] };
+    };
+
+    expect(cliExecutorCall.mock.calls[0]?.[6]).toEqual({
+      provider: 'codex',
+      providers: ['codex'],
+      command: '/usr/local/bin/codex',
+    });
+  });
 });

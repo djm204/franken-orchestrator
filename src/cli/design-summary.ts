@@ -25,7 +25,8 @@ export function extractDesignSummary(markdown: string): DesignSummary {
 
     const lines = text.split(/\r?\n/);
     const titleLine = lines.find((line) => /^# /.test(line.trim()));
-    const title = titleLine ? titleLine.trim().replace(/^# /, '').trim() : DEFAULT_SUMMARY.title;
+    const parsedTitle = titleLine ? titleLine.trim().replace(/^# /, '').trim() : '';
+    const title = parsedTitle || DEFAULT_SUMMARY.title;
     const sectionCount = lines.filter((line) => /^## /.test(line.trim())).length;
 
     let blurb = '';

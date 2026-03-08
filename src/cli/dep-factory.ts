@@ -154,6 +154,11 @@ export async function createCliDeps(options: CliDepOptions): Promise<CliDeps> {
   const cliExecutor = new CliSkillExecutor(
     martin, gitIso, observerBridge.observerDeps,
     verifyCommand, commitMessageFn, logger,
+    {
+      provider: options.provider,
+      providers: options.providers,
+      ...(override?.command ? { command: override.command } : {}),
+    },
   );
 
   const finalize = async () => {
