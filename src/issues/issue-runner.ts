@@ -256,7 +256,7 @@ export class IssueRunner {
           planSummary: `Fixes #${issue.number}: ${issue.title}`,
         };
 
-        const prResult = await prCreator.create(beastResult, logger);
+        const prResult = await prCreator.create(beastResult, logger, { issueNumber: issue.number });
         if (prResult) {
           prUrl = prResult.url;
           logger?.info(`[issues] Issue #${issue.number} fixed, PR: ${prUrl}`, undefined, 'issues');

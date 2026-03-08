@@ -9,6 +9,10 @@ export interface PrCreatorConfig {
   readonly remote: string;
 }
 
+export interface PrCreateOptions {
+  readonly issueNumber?: number | undefined;
+}
+
 type ExecFn = (cmd: string) => string;
 
 const defaultExec: ExecFn = (cmd: string) => execSync(cmd, { encoding: 'utf-8', stdio: 'pipe' });
@@ -54,10 +58,11 @@ export class PrCreator {
     commitLog: string,
     diffStat: string,
     result: BeastResult,
+    issueNumber?: number,
   ): Promise<{ title: string; body: string } | null> {
     if (!this.llm) return null;
     try {
-      const prompt = [
+      const promptLines = [
         'Write a GitHub PR title and body for these changes.',
         'Title: max 70 chars, semver-compatible conventional commit style (e.g. feat(module): description).',
         'Body: markdown with ## Summary (2-4 bullets) and ## Changes (key files).',
@@ -70,12 +75,21 @@ export class PrCreator {
         '',
         `Project: ${result.projectId}`,
         `Chunks completed: ${result.taskResults?.length ?? 0}`,
+      ];
+
+      if (issueNumber != null) {
+        promptLines.push(`This PR fixes GitHub issue #${issueNumber}.`);
+      }
+
+      promptLines.push(
         '',
         'Respond in this exact format:',
         'TITLE: <title here>',
         'BODY:',
         '<body here>',
-      ].join('\n');
+      );
+
+      const prompt = promptLines.join('\n');
 
       const raw = await this.llm.complete(prompt);
       return parsePrDescription(raw);
@@ -84,7 +98,7 @@ export class PrCreator {
     }
   }
 
-  async create(result: BeastResult, logger?: ILogger): Promise<{ url: string } | null> {
+  async create(result: BeastResult, logger?: ILogger, options?: PrCreateOptions): Promise<{ url: string } | null> {
     if (this.config.disabled) {
       logger?.warn('PrCreator: skipped (disabled)');
       return null;
@@ -107,9 +121,16 @@ export class PrCreator {
       return null;
     }
 
-    if (branch === this.config.targetBranch) {
-      logger?.warn('PrCreator: skipped — current branch is same as target', { branch, target: this.config.targetBranch });
-      return null;
+    let targetBranch = this.config.targetBranch;
+    if (branch === targetBranch) {
+      if (targetBranch === 'main') {
+        logger?.warn('PrCreator: skipped — current branch is main, cannot PR main to main', { branch });
+        return null;
+      }
+      logger?.info('PrCreator: current branch equals base-branch, targeting main instead', {
+        branch, originalTarget: targetBranch,
+      });
+      targetBranch = 'main';
     }
 
     if (!this.pushBranch(branch, logger)) {
@@ -126,13 +147,13 @@ export class PrCreator {
     }
 
     // Gather git context for PR description
-    const gitContext = this.gatherGitContext(this.config.targetBranch, logger);
+    const gitContext = this.gatherGitContext(targetBranch, logger);
 
     // Try LLM-generated PR description first, fall back to template
     let title: string;
     let body: string;
 
-    const llmResult = await this.tryGeneratePrFromLlm(result, logger);
+    const llmResult = await this.tryGeneratePrFromLlm(result, logger, options?.issueNumber);
     if (llmResult) {
       title = llmResult.title;
       body = llmResult.body;
@@ -141,9 +162,14 @@ export class PrCreator {
       body = buildBody(result, outcomes, gitContext);
     }
 
+    // Append issue reference if provided and not already present
+    if (options?.issueNumber != null) {
+      body = appendIssueRef(body, options.issueNumber);
+    }
+
     try {
       const output = this.exec(
-        `gh pr create --base ${this.config.targetBranch} --title ${shellEscape(title)} --body ${shellEscape(body)}`,
+        `gh pr create --base ${targetBranch} --title ${shellEscape(title)} --body ${shellEscape(body)}`,
       );
       const url = output.trim();
       if (!url) {
@@ -199,6 +225,7 @@ export class PrCreator {
   private async tryGeneratePrFromLlm(
     result: BeastResult,
     logger?: ILogger,
+    issueNumber?: number,
   ): Promise<{ title: string; body: string } | null> {
     if (!this.llm) return null;
     try {
@@ -210,7 +237,7 @@ export class PrCreator {
         `git diff --stat ${this.config.targetBranch}..HEAD`,
         logger,
       ) ?? '';
-      return await this.generatePrDescription(commitLog, diffStat, result);
+      return await this.generatePrDescription(commitLog, diffStat, result, issueNumber);
     } catch {
       return null;
     }
@@ -474,6 +501,13 @@ function parsePrDescription(raw: string): { title: string; body: string } | null
 }
 
 const BRANDING = 'made with Frankenbeast 🧟';
+
+function appendIssueRef(body: string, issueNumber: number): string {
+  const ref = `Fixes #${issueNumber}`;
+  // Check if the body already contains this exact issue reference
+  if (body.includes(ref)) return body;
+  return `${body}\n\nFixes #${issueNumber}`;
+}
 
 function cleanCommitMessage(raw: string): string {
   let msg = raw.trim();
