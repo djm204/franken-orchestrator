@@ -10,36 +10,6 @@ type SpawnFn = (
   options: SpawnOptions,
 ) => ChildProcess;
 
-function tryExtractTextFromNode(node: unknown, out: string[]): void {
-  if (typeof node === 'string') {
-    if (node.trim().length > 0) out.push(node);
-    return;
-  }
-  if (!node || typeof node !== 'object') return;
-
-  if (Array.isArray(node)) {
-    for (const item of node) tryExtractTextFromNode(item, out);
-    return;
-  }
-
-  const obj = node as Record<string, unknown>;
-  const directKeys = ['text', 'output_text', 'output'];
-  for (const key of directKeys) {
-    const value = obj[key];
-    if (typeof value === 'string' && value.trim().length > 0) {
-      out.push(value);
-    }
-  }
-
-  // message and content_block in nestedKeys per MEMORY.md
-  const nestedKeys = ['delta', 'content', 'parts', 'data', 'result', 'response', 'message', 'content_block'];
-  for (const key of nestedKeys) {
-    if (obj[key] !== undefined) {
-      tryExtractTextFromNode(obj[key], out);
-    }
-  }
-}
-
 export interface CliLlmAdapterOpts {
   workingDir: string;
   timeoutMs?: number;
@@ -139,45 +109,12 @@ export class CliLlmAdapter implements IAdapter {
 
   transformResponse(providerResponse: unknown, _requestId: string): { content: string | null } {
     const raw = providerResponse as string;
-    if (!raw) {
-      return { content: '' };
-    }
-
-    if (this.provider.supportsStreamJson()) {
-      return this.parseStreamJson(raw);
-    }
-
-    // Non-stream-json: delegate to provider
+    if (!raw) return { content: '' };
     const normalized = this.provider.normalizeOutput(raw);
-    return { content: normalized || raw };
+    return { content: normalized };
   }
 
   validateCapabilities(feature: string): boolean {
     return feature === 'text-completion';
-  }
-
-  private parseStreamJson(raw: string): { content: string | null } {
-    // Strip hook output blocks (multi-line formatted JSON containing hookSpecificOutput)
-    const cleaned = raw.replace(/\{[\s\S]*?"hookSpecificOutput"[\s\S]*?\n\}/g, '');
-    if (cleaned.trim().length === 0) return { content: '' };
-    const lines = cleaned.split('\n').map((l) => l.trim()).filter((l) => l.length > 0);
-    const extracted: string[] = [];
-    let parsedJsonLines = 0;
-
-    for (const line of lines) {
-      try {
-        const parsed = JSON.parse(line) as unknown;
-        parsedJsonLines++;
-        tryExtractTextFromNode(parsed, extracted);
-      } catch {
-        // Not JSON — keep as-is
-        extracted.push(line);
-      }
-    }
-
-    if (parsedJsonLines > 0 && extracted.length === 0) return { content: raw };
-    if (extracted.length === 0) return { content: raw };
-
-    return { content: extracted.join('') };
   }
 }

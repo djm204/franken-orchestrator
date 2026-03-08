@@ -48,7 +48,12 @@ export class PrCreator {
       ].join('\n');
 
       const raw = await this.llm.complete(prompt);
-      return cleanCommitMessage(raw);
+      const msg = cleanCommitMessage(raw);
+      const subject = msg.split('\n')[0] ?? '';
+      if (!CONVENTIONAL_SUBJECT_RE.test(subject)) {
+        return buildFallbackCommitMessage(chunkObjective);
+      }
+      return msg;
     } catch {
       return null;
     }
@@ -502,6 +507,14 @@ function parsePrDescription(raw: string): { title: string; body: string } | null
 
 const BRANDING = 'made with Frankenbeast 🧟';
 
+/** Matches a valid conventional commit subject: type(scope): description */
+const CONVENTIONAL_SUBJECT_RE = /^[a-z]+(\([^)]+\))?: \S/;
+
+function buildFallbackCommitMessage(chunkObjective: string): string {
+  const slug = chunkObjective.trim().slice(0, 50).replace(/\s+/g, '-').replace(/[^a-zA-Z0-9-]/g, '').replace(/-{2,}/g, '-').replace(/^-|-$/g, '').toLowerCase();
+  return `chore: implement ${slug || 'changes'}\n\n${BRANDING}`;
+}
+
 function appendIssueRef(body: string, issueNumber: number): string {
   const ref = `Fixes #${issueNumber}`;
   // Check if the body already contains this exact issue reference
@@ -512,7 +525,7 @@ function appendIssueRef(body: string, issueNumber: number): string {
 function cleanCommitMessage(raw: string): string {
   let msg = raw.trim();
   // Strip markdown code fences
-  msg = msg.replace(/^```[\s\S]*?\n?/, '').replace(/\n?```\s*$/, '').trim();
+  msg = msg.replace(/^```[^\n]*\n?/, '').replace(/\n?```\s*$/, '').trim();
   // Take first non-empty line only
   const firstLine = msg.split('\n').find(l => l.trim().length > 0) ?? msg;
   // Truncate to 72 chars
