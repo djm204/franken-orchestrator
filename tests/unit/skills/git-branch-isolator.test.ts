@@ -51,6 +51,30 @@ describe('GitBranchIsolator', () => {
       );
     });
 
+    it('recovers from dirty index (leftover merge) and retries checkout', () => {
+      let checkoutAttempts = 0;
+      mockExecSync.mockImplementation((cmd: string) => {
+        if (cmd === 'git checkout main') {
+          checkoutAttempts++;
+          if (checkoutAttempts === 1) {
+            throw new Error('error: you need to resolve your current index first');
+          }
+          return '';
+        }
+        if (cmd === 'git merge --abort') return '';
+        if (cmd === 'git branch --list chunk/03_my_chunk') return '';
+        return '';
+      });
+
+      isolator.isolate('03_my_chunk');
+
+      expect(checkoutAttempts).toBe(2);
+      expect(mockExecSync).toHaveBeenCalledWith(
+        'git merge --abort',
+        expect.objectContaining({ cwd: '/fake/repo' }),
+      );
+    });
+
     it('checks out existing branch when it already exists', () => {
       mockExecSync
         .mockReturnValueOnce('') // git checkout main
@@ -146,23 +170,22 @@ describe('GitBranchIsolator', () => {
       expect(result).toEqual({ merged: false, commits: 0 });
     });
 
-    it('aborts on merge conflict and returns merged: false', () => {
+    it('returns conflicted state on merge conflict instead of aborting', () => {
       mockExecSync.mockImplementation((cmd: string) => {
         if (cmd === 'git rev-list --count main..chunk/03_my_chunk') return '2\n';
         if (cmd === 'git checkout main') return '';
         if (cmd === 'git merge chunk/03_my_chunk --no-edit') {
           throw new Error('CONFLICT (content): Merge conflict');
         }
+        if (cmd === 'git diff --name-only --diff-filter=U') return 'file.ts\n';
         return '';
       });
 
       const result = isolator.merge('03_my_chunk');
 
-      expect(result).toEqual({ merged: false, commits: 2 });
-      expect(mockExecSync).toHaveBeenCalledWith(
-        'git merge --abort',
-        expect.objectContaining({ cwd: '/fake/repo' }),
-      );
+      expect(result.merged).toBe(false);
+      expect(result.commits).toBe(2);
+      expect(result.conflicted).toBe(true);
     });
 
     it('uses squash merge when commitMessage is provided', () => {
@@ -199,23 +222,23 @@ describe('GitBranchIsolator', () => {
       );
     });
 
-    it('aborts squash merge on conflict and returns merged: false', () => {
+    it('returns conflicted state on squash merge conflict', () => {
       mockExecSync.mockImplementation((cmd: string) => {
         if (cmd === 'git rev-list --count main..chunk/03_my_chunk') return '2\n';
         if (cmd === 'git checkout main') return '';
         if (cmd === 'git merge --squash chunk/03_my_chunk') {
           throw new Error('CONFLICT');
         }
+        if (cmd === 'git diff --name-only --diff-filter=U') return 'src/types.ts\n';
         return '';
       });
 
       const result = isolator.merge('03_my_chunk', 'feat(types): add types');
 
-      expect(result).toEqual({ merged: false, commits: 2 });
-      expect(mockExecSync).toHaveBeenCalledWith(
-        'git merge --abort',
-        expect.objectContaining({ cwd: '/fake/repo' }),
-      );
+      expect(result.merged).toBe(false);
+      expect(result.commits).toBe(2);
+      expect(result.conflicted).toBe(true);
+      expect(result.conflictFiles).toEqual(['src/types.ts']);
     });
 
     it('sanitizes commitMessage to prevent shell injection', () => {
@@ -286,6 +309,153 @@ describe('GitBranchIsolator', () => {
       });
 
       expect(isolator.getDiffStat('03_my_chunk')).toBe('src/foo.ts | 10 +++\n 1 file changed');
+    });
+  });
+
+  describe('merge() with conflict resolution', () => {
+    it('returns conflicted state with file list when merge has conflicts', () => {
+      mockExecSync.mockImplementation((cmd: string) => {
+        if (cmd === 'git rev-list --count main..chunk/03_my_chunk') return '2\n';
+        if (cmd === 'git checkout main') return '';
+        if (cmd === 'git merge chunk/03_my_chunk --no-edit') {
+          throw new Error('CONFLICT (content): Merge conflict in docs/ARCHITECTURE.md');
+        }
+        if (cmd === 'git diff --name-only --diff-filter=U') return 'docs/ARCHITECTURE.md\n';
+        return '';
+      });
+
+      const result = isolator.merge('03_my_chunk');
+
+      expect(result.merged).toBe(false);
+      expect(result.commits).toBe(2);
+      expect(result.conflicted).toBe(true);
+      expect(result.conflictFiles).toEqual(['docs/ARCHITECTURE.md']);
+      // Should NOT have called merge --abort (leave conflicts for resolution)
+      expect(mockExecSync).not.toHaveBeenCalledWith(
+        'git merge --abort',
+        expect.anything(),
+      );
+    });
+
+    it('returns conflicted with multiple files', () => {
+      mockExecSync.mockImplementation((cmd: string) => {
+        if (cmd === 'git rev-list --count main..chunk/03_my_chunk') return '3\n';
+        if (cmd === 'git checkout main') return '';
+        if (cmd === 'git merge chunk/03_my_chunk --no-edit') {
+          throw new Error('CONFLICT');
+        }
+        if (cmd === 'git diff --name-only --diff-filter=U') {
+          return 'docs/ARCHITECTURE.md\nsrc/cli/run.ts\n';
+        }
+        return '';
+      });
+
+      const result = isolator.merge('03_my_chunk');
+
+      expect(result.conflicted).toBe(true);
+      expect(result.conflictFiles).toEqual(['docs/ARCHITECTURE.md', 'src/cli/run.ts']);
+    });
+
+    it('falls back to abort when conflict detection finds no files (non-conflict error)', () => {
+      mockExecSync.mockImplementation((cmd: string) => {
+        if (cmd === 'git rev-list --count main..chunk/03_my_chunk') return '2\n';
+        if (cmd === 'git checkout main') return '';
+        if (cmd === 'git merge chunk/03_my_chunk --no-edit') {
+          throw new Error('fatal: some other git error');
+        }
+        if (cmd === 'git diff --name-only --diff-filter=U') return '';
+        return '';
+      });
+
+      const result = isolator.merge('03_my_chunk');
+
+      expect(result.merged).toBe(false);
+      expect(result.conflicted).toBeUndefined();
+      expect(mockExecSync).toHaveBeenCalledWith(
+        'git merge --abort',
+        expect.anything(),
+      );
+    });
+  });
+
+  describe('getConflictedFiles()', () => {
+    it('returns list of files with unresolved conflicts', () => {
+      mockExecSync.mockImplementation((cmd: string) => {
+        if (cmd === 'git diff --name-only --diff-filter=U') {
+          return 'docs/ARCHITECTURE.md\nsrc/foo.ts\n';
+        }
+        return '';
+      });
+
+      expect(isolator.getConflictedFiles()).toEqual(['docs/ARCHITECTURE.md', 'src/foo.ts']);
+    });
+
+    it('returns empty array when no conflicts', () => {
+      mockExecSync.mockReturnValue('');
+      expect(isolator.getConflictedFiles()).toEqual([]);
+    });
+  });
+
+  describe('getConflictDiff()', () => {
+    it('returns the diff showing conflict markers', () => {
+      const conflictDiff = '<<<<<<< HEAD\nMartinLoop\n=======\nRalphLoop\n>>>>>>> feat/06\n';
+      mockExecSync.mockImplementation((cmd: string) => {
+        if (cmd === 'git diff') return conflictDiff;
+        return '';
+      });
+
+      expect(isolator.getConflictDiff()).toBe(conflictDiff.trim());
+    });
+  });
+
+  describe('completeMerge()', () => {
+    it('stages all files and commits with provided message', () => {
+      const calls: string[] = [];
+      mockExecSync.mockImplementation((cmd: string) => {
+        calls.push(cmd);
+        return '';
+      });
+
+      isolator.completeMerge('feat: merge chunk 03');
+
+      expect(calls).toContain('git add -A');
+      expect(calls).toContain('git commit -m "feat: merge chunk 03"');
+    });
+
+    it('sanitizes commit message', () => {
+      mockExecSync.mockReturnValue('');
+      isolator.completeMerge('feat: add "shared" types');
+
+      expect(mockExecSync).toHaveBeenCalledWith(
+        expect.stringContaining('feat: add \\"shared\\" types'),
+        expect.anything(),
+      );
+    });
+  });
+
+  describe('abortMerge()', () => {
+    it('aborts the merge', () => {
+      mockExecSync.mockReturnValue('');
+      isolator.abortMerge();
+
+      expect(mockExecSync).toHaveBeenCalledWith(
+        'git merge --abort',
+        expect.anything(),
+      );
+    });
+
+    it('falls back to reset --hard HEAD when abort fails', () => {
+      mockExecSync.mockImplementation((cmd: string) => {
+        if (cmd === 'git merge --abort') throw new Error('MERGE_HEAD missing');
+        return '';
+      });
+
+      isolator.abortMerge();
+
+      expect(mockExecSync).toHaveBeenCalledWith(
+        'git reset --hard HEAD',
+        expect.anything(),
+      );
     });
   });
 

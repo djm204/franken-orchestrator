@@ -1,5 +1,5 @@
 import { execSync } from 'node:child_process';
-import type { MartinLoopConfig, MartinLoopResult, IterationResult, CliSkillConfig } from './cli-types.js';
+import type { MartinLoopConfig, MartinLoopResult, IterationResult, CliSkillConfig, MergeResult } from './cli-types.js';
 import type { SkillInput, SkillResult, ICheckpointStore, ILogger } from '../deps.js';
 import type { MartinLoop } from './martin-loop.js';
 import type { GitBranchIsolator } from './git-branch-isolator.js';
@@ -386,13 +386,13 @@ export class CliSkillExecutor {
     }
 
     // Git merge
-    let mergeResult: { merged: boolean; commits: number };
+    let mergeResult: MergeResult;
     try {
       mergeResult = commitMessage
         ? this.git.merge(chunkId, commitMessage)
         : this.git.merge(chunkId);
     } catch (err) {
-      // Merge failed (conflict) — still return SkillResult with output
+      // Merge threw (unexpected error) — still return SkillResult with output
       this.observer.setMetadata(chunkSpan, {
         mergeError: String(err),
       });
@@ -405,6 +405,13 @@ export class CliSkillExecutor {
         output: martinResult.output,
         tokensUsed: postTokens.totalTokens - preTokens.totalTokens,
       };
+    }
+
+    // Merge conflict detected — hand to LLM for resolution
+    if (!mergeResult.merged && mergeResult.conflicted && mergeResult.conflictFiles?.length) {
+      mergeResult = await this.attemptConflictResolution(
+        chunkId, mergeResult, commitMessage, wrappedConfig, chunkSpan,
+      );
     }
 
     const postTokens = this.observer.counter.grandTotal();
@@ -432,6 +439,68 @@ export class CliSkillExecutor {
       output: martinResult.output,
       tokensUsed: chunkTokensUsed,
     };
+  }
+
+  private async attemptConflictResolution(
+    chunkId: string,
+    mergeResult: MergeResult,
+    commitMessage: string | undefined,
+    parentConfig: MartinLoopConfig,
+    chunkSpan: Span,
+  ): Promise<MergeResult> {
+    const conflictFiles = mergeResult.conflictFiles ?? [];
+    const conflictDiff = this.git.getConflictDiff();
+
+    this.logger?.warn('Merge conflict detected — spawning LLM resolution', {
+      chunkId,
+      conflictFiles,
+    }, 'git');
+
+    const resolvePrompt = [
+      `You have a git merge conflict to resolve. The following files have conflict markers (<<<<<<< ======= >>>>>>>):`,
+      conflictFiles.join(', '),
+      '',
+      'Edit each conflicted file to resolve the conflicts by choosing the correct content. Remove all conflict markers.',
+      '',
+      `Conflict diff:\n${conflictDiff}`,
+    ].join('\n');
+
+    const resolveConfig: MartinLoopConfig = {
+      prompt: resolvePrompt,
+      promiseTag: `RESOLVE_${chunkId}_DONE`,
+      maxIterations: 3,
+      maxTurns: 10,
+      provider: parentConfig.provider,
+      command: parentConfig.command,
+      timeoutMs: 120_000,
+      workingDir: this.git.getWorkingDir(),
+    };
+
+    try {
+      await this.martin.run(resolveConfig);
+    } catch {
+      // Resolution failed — abort and move on
+      this.logger?.error('Conflict resolution failed', { chunkId }, 'git');
+      this.git.abortMerge();
+      this.observer.setMetadata(chunkSpan, { conflictResolution: 'failed' });
+      return mergeResult;
+    }
+
+    // Check if conflicts were actually resolved
+    const remaining = this.git.getConflictedFiles();
+    if (remaining.length === 0) {
+      const msg = commitMessage ?? `auto: merge ${chunkId} (conflict resolved)`;
+      this.git.completeMerge(msg);
+      this.logger?.info('Merge conflict resolved by LLM', { chunkId }, 'git');
+      this.observer.setMetadata(chunkSpan, { conflictResolution: 'resolved' });
+      return { merged: true, commits: mergeResult.commits };
+    }
+
+    // Still conflicted — abort
+    this.logger?.error('LLM did not resolve all conflicts', { chunkId, remaining }, 'git');
+    this.git.abortMerge();
+    this.observer.setMetadata(chunkSpan, { conflictResolution: 'failed', remainingFiles: remaining });
+    return mergeResult;
   }
 
   private extractChunkId(skillId: string): string {

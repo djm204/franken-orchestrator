@@ -88,6 +88,10 @@ function makeMockGit() {
     getWorkingDir: vi.fn().mockReturnValue('/tmp/test-repo'),
     getStatus: vi.fn().mockReturnValue(''),
     resetHard: vi.fn(),
+    getConflictedFiles: vi.fn().mockReturnValue([]),
+    getConflictDiff: vi.fn().mockReturnValue(''),
+    completeMerge: vi.fn(),
+    abortMerge: vi.fn(),
   };
 }
 
@@ -305,7 +309,7 @@ describe('CliSkillExecutor', () => {
   });
 
   describe('merge conflict handling', () => {
-    it('returns SkillResult with output even when git.merge fails', async () => {
+    it('returns SkillResult with output even when git.merge throws', async () => {
       git.merge.mockImplementation(() => { throw new Error('merge conflict in file.ts'); });
 
       const result = await createAndExecute();
@@ -316,6 +320,75 @@ describe('CliSkillExecutor', () => {
         expect.any(Object),
         expect.objectContaining({ mergeError: expect.stringContaining('merge conflict') }),
       );
+    });
+
+    it('spawns MartinLoop to resolve conflicts when merge returns conflicted', async () => {
+      git.merge.mockReturnValue({
+        merged: false, commits: 2, conflicted: true,
+        conflictFiles: ['docs/ARCHITECTURE.md'],
+      });
+      git.getConflictDiff.mockReturnValue('<<<<<<< HEAD\nMartin\n=======\nRalph\n>>>>>>> feat/06');
+      // After LLM resolution, conflicts are gone
+      git.getConflictedFiles.mockReturnValue([]);
+
+      // Second martin.run call (conflict resolution) succeeds
+      martin.run
+        .mockResolvedValueOnce({ completed: true, iterations: 1, output: 'impl done', tokensUsed: 100 })
+        .mockResolvedValueOnce({ completed: true, iterations: 1, output: 'resolved', tokensUsed: 50 });
+
+      const result = await createAndExecute();
+
+      // Should have called martin.run twice (impl + conflict resolution)
+      expect(martin.run).toHaveBeenCalledTimes(2);
+      // Second call should have a conflict resolution prompt
+      const resolveConfig = martin.run.mock.calls[1]![0] as MartinLoopConfig;
+      expect(resolveConfig.prompt).toContain('merge conflict');
+      expect(resolveConfig.prompt).toContain('docs/ARCHITECTURE.md');
+      expect(resolveConfig.maxIterations).toBeLessThanOrEqual(3);
+      // Should complete the merge after resolution
+      expect(git.completeMerge).toHaveBeenCalled();
+      expect(git.abortMerge).not.toHaveBeenCalled();
+      expect(result.output).toBe('impl done');
+    });
+
+    it('aborts merge when LLM fails to resolve conflicts', async () => {
+      git.merge.mockReturnValue({
+        merged: false, commits: 2, conflicted: true,
+        conflictFiles: ['docs/ARCHITECTURE.md'],
+      });
+      git.getConflictDiff.mockReturnValue('<<<<<<< HEAD\nfoo\n=======\nbar\n>>>>>>>');
+      // After LLM resolution attempt, conflicts remain
+      git.getConflictedFiles.mockReturnValue(['docs/ARCHITECTURE.md']);
+
+      martin.run
+        .mockResolvedValueOnce({ completed: true, iterations: 1, output: 'impl done', tokensUsed: 100 })
+        .mockResolvedValueOnce({ completed: false, iterations: 2, output: 'gave up', tokensUsed: 50 });
+
+      const result = await createAndExecute();
+
+      // Should abort the merge since conflicts remain
+      expect(git.abortMerge).toHaveBeenCalled();
+      expect(git.completeMerge).not.toHaveBeenCalled();
+      // Should still return SkillResult (not throw)
+      expect(result.output).toBe('impl done');
+    });
+
+    it('aborts merge when conflict resolution MartinLoop throws', async () => {
+      git.merge.mockReturnValue({
+        merged: false, commits: 2, conflicted: true,
+        conflictFiles: ['file.ts'],
+      });
+      git.getConflictDiff.mockReturnValue('conflict diff');
+      git.getConflictedFiles.mockReturnValue(['file.ts']);
+
+      martin.run
+        .mockResolvedValueOnce({ completed: true, iterations: 1, output: 'impl done', tokensUsed: 100 })
+        .mockRejectedValueOnce(new Error('spawn failed'));
+
+      const result = await createAndExecute();
+
+      expect(git.abortMerge).toHaveBeenCalled();
+      expect(result.output).toBe('impl done');
     });
   });
 

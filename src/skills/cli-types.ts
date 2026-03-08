@@ -51,6 +51,13 @@ export interface GitIsolationConfig {
   readonly workingDir: string;
 }
 
+export interface MergeResult {
+  readonly merged: boolean;
+  readonly commits: number;
+  readonly conflicted?: boolean;
+  readonly conflictFiles?: readonly string[];
+}
+
 export interface CliSkillConfig {
   readonly martin: MartinLoopConfig;
   readonly git: GitIsolationConfig;

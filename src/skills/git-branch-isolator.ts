@@ -1,7 +1,7 @@
 import { execSync } from 'node:child_process';
 import { unlinkSync } from 'node:fs';
 import { resolve } from 'node:path';
-import type { GitIsolationConfig } from './cli-types.js';
+import type { GitIsolationConfig, MergeResult } from './cli-types.js';
 
 const SAFE_ID = /^[a-zA-Z0-9_\-./]+$/;
 
@@ -96,7 +96,18 @@ export class GitBranchIsolator {
   isolate(chunkId: string): void {
     assertSafeId(chunkId);
     const branch = this.branchName(chunkId);
-    this.safeCheckout(this.config.baseBranch);
+    try {
+      this.safeCheckout(this.config.baseBranch);
+    } catch (err) {
+      const msg = String(err);
+      if (msg.includes('resolve your current index') || msg.includes('Unmerged')) {
+        // Leftover merge state from a previous chunk — clean up and retry
+        this.abortMerge();
+        this.safeCheckout(this.config.baseBranch);
+      } else {
+        throw err;
+      }
+    }
     const exists = this.git(`branch --list ${branch}`);
     if (exists.length > 0) {
       this.safeCheckout(branch);
@@ -145,7 +156,7 @@ export class GitBranchIsolator {
     }
   }
 
-  merge(chunkId: string, commitMessage?: string): { merged: boolean; commits: number } {
+  merge(chunkId: string, commitMessage?: string): MergeResult {
     assertSafeId(chunkId);
     const branch = this.branchName(chunkId);
     const count = parseInt(
@@ -168,8 +179,43 @@ export class GitBranchIsolator {
       }
       return { merged: true, commits: count };
     } catch {
-      this.git('merge --abort');
+      // Check if this is a merge conflict (files with unresolved markers)
+      const conflictFiles = this.getConflictedFiles();
+      if (conflictFiles.length > 0) {
+        // Leave conflicts in place for caller to resolve via LLM
+        return { merged: false, commits: count, conflicted: true, conflictFiles };
+      }
+      // Not a conflict — some other git error. Abort and report.
+      this.abortMerge();
       return { merged: false, commits: count };
+    }
+  }
+
+  getConflictedFiles(): string[] {
+    try {
+      const output = this.git('diff --name-only --diff-filter=U');
+      return output.split('\n').filter(f => f.length > 0);
+    } catch {
+      return [];
+    }
+  }
+
+  getConflictDiff(): string {
+    return this.git('diff');
+  }
+
+  completeMerge(commitMessage: string): void {
+    const safeMsg = commitMessage.replace(/"/g, '\\"');
+    this.git('add -A');
+    this.git(`commit -m "${safeMsg}"`);
+  }
+
+  abortMerge(): void {
+    try {
+      this.git('merge --abort');
+    } catch {
+      // MERGE_HEAD may be missing — force-clean the index
+      this.git('reset --hard HEAD');
     }
   }
 
