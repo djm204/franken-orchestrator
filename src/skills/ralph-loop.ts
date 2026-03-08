@@ -1,15 +1,8 @@
 import { spawn } from 'node:child_process';
 import type { RalphLoopConfig, RalphLoopResult, IterationResult } from './cli-types.js';
-
-const RATE_LIMIT_PATTERNS =
-  /rate.?limit|429|too many requests|retry.?after|overloaded|capacity|temporarily unavailable|out of extra usage|usage limit|resets?\s+\d|resets?\s+in\s+\d+\s*s/i;
-
-function isRateLimited(stderr: string): boolean {
-  // Only check stderr for rate-limit signals. Checking stdout causes false
-  // positives when the model's output contains rate-limit-related text (e.g.
-  // implementing rate limiting features).
-  return RATE_LIMIT_PATTERNS.test(stderr);
-}
+import type { ICliProvider } from './providers/cli-provider.js';
+import { ProviderRegistry, createDefaultRegistry } from './providers/cli-provider.js';
+import { tryExtractTextFromNode } from './providers/index.js';
 
 export function parseResetTime(stderr: string, stdout: string): { sleepSeconds: number; source: string } {
   const combined = `${stderr}\n${stdout}`;
@@ -111,52 +104,6 @@ function sleepWithAbort(
   });
 }
 
-function buildClaudeArgs(prompt: string, maxTurns: number): string[] {
-  return [
-    '--print', '--dangerously-skip-permissions',
-    '--output-format', 'stream-json',
-    '--verbose',
-    '--disable-slash-commands',
-    '--no-session-persistence',
-    '--plugin-dir', '/dev/null',
-    '--max-turns', String(maxTurns),
-    '--', prompt,
-  ];
-}
-
-function buildCodexArgs(prompt: string): string[] {
-  return ['exec', '--full-auto', '--json', '--color', 'never', prompt];
-}
-
-function tryExtractTextFromNode(node: unknown, out: string[]): void {
-  if (typeof node === 'string') {
-    if (node.trim().length > 0) out.push(node);
-    return;
-  }
-  if (!node || typeof node !== 'object') return;
-
-  if (Array.isArray(node)) {
-    for (const item of node) tryExtractTextFromNode(item, out);
-    return;
-  }
-
-  const obj = node as Record<string, unknown>;
-  const directKeys = ['text', 'output_text', 'output'];
-  for (const key of directKeys) {
-    const value = obj[key];
-    if (typeof value === 'string' && value.trim().length > 0) {
-      out.push(value);
-    }
-  }
-
-  const nestedKeys = ['delta', 'content', 'parts', 'data', 'result', 'response', 'message', 'content_block'];
-  for (const key of nestedKeys) {
-    if (obj[key] !== undefined) {
-      tryExtractTextFromNode(obj[key], out);
-    }
-  }
-}
-
 /**
  * Process a single complete line from stream-json output.
  * If it's valid JSON, extract text content. If plain text, pass through.
@@ -220,52 +167,18 @@ export class StreamLineBuffer {
   }
 }
 
-export function normalizeCodexOutput(stdout: string): string {
-  const lines = stdout
-    .split('\n')
-    .map((line) => line.trim())
-    .filter((line) => line.length > 0);
-
-  const extracted: string[] = [];
-  let parsedJsonLines = 0;
-
-  for (const line of lines) {
-    try {
-      const parsed = JSON.parse(line) as unknown;
-      parsedJsonLines++;
-      tryExtractTextFromNode(parsed, extracted);
-    } catch {
-      // Keep non-JSON lines verbatim.
-      extracted.push(line);
-    }
-  }
-
-  // If nothing useful was extracted from JSON, preserve original output.
-  if (parsedJsonLines > 0 && extracted.length === 0) return stdout;
-  return extracted.join('\n').trim();
-}
-
 function spawnIteration(
   config: RalphLoopConfig,
-  provider: string,
+  provider: ICliProvider,
 ): Promise<{ stdout: string; stderr: string; exitCode: number; timedOut: boolean; cleanStdout: string }> {
   return new Promise((resolve, reject) => {
-    const cmd = config.command ?? provider;
-    const args = provider === 'claude'
-      ? buildClaudeArgs(config.prompt, config.maxTurns)
-      : buildCodexArgs(config.prompt);
+    const cmd = config.command ?? provider.command;
+    const providerArgs = provider.buildArgs({ maxTurns: config.maxTurns });
+    const args = provider.supportsStreamJson()
+      ? [...providerArgs, '--', config.prompt]
+      : [...providerArgs, config.prompt];
 
-    const env = { ...process.env };
-    if (provider === 'claude') {
-      // Remove ALL Claude-related env vars to prevent the spawned CLI from
-      // inheriting parent session state (e.g. CLAUDE_CODE_ENTRYPOINT=claude-vscode
-      // causes it to try connecting to VS Code and freeze).
-      for (const key of Object.keys(env)) {
-        if (key.startsWith('CLAUDE')) {
-          delete env[key];
-        }
-      }
-    }
+    const env = provider.filterEnv(process.env as Record<string, string>);
 
     const child = spawn(cmd, args, {
       stdio: ['ignore', 'pipe', 'pipe'],
@@ -278,7 +191,7 @@ function spawnIteration(
     let settled = false;
     let timedOut = false;
     const cleanParts: string[] = [];
-    const streamBuffer = provider === 'claude' ? new StreamLineBuffer() : null;
+    const streamBuffer = provider.supportsStreamJson() ? new StreamLineBuffer() : null;
 
     const finish = (result: { stdout: string; stderr: string; exitCode: number; timedOut: boolean; cleanStdout: string }): void => {
       if (settled) return;
@@ -289,7 +202,7 @@ function spawnIteration(
     child.stdout!.on('data', (chunk: Buffer) => {
       const text = chunk.toString();
       stdout += text;
-      // Stream output to terminal so the user can see Claude working
+      // Stream output to terminal so the user can see the agent working
       if (streamBuffer) {
         const lines = streamBuffer.push(text);
         for (const line of lines) {
@@ -311,7 +224,7 @@ function spawnIteration(
     // Timeout: SIGTERM first, then SIGKILL after 5s
     const timer = setTimeout(() => {
       timedOut = true;
-      config.onProviderTimeout?.(provider, config.timeoutMs);
+      config.onProviderTimeout?.(provider.name, config.timeoutMs);
       child.kill('SIGTERM');
       setTimeout(() => {
         try { child.kill('SIGKILL'); } catch { /* already dead */ }
@@ -349,6 +262,12 @@ function spawnIteration(
 }
 
 export class RalphLoop {
+  private readonly registry: ProviderRegistry;
+
+  constructor(registry?: ProviderRegistry) {
+    this.registry = registry ?? createDefaultRegistry();
+  }
+
   async run(config: RalphLoopConfig): Promise<RalphLoopResult> {
     const providers: readonly string[] =
       config.providers && config.providers.length > 0
@@ -370,11 +289,13 @@ export class RalphLoop {
     while (iteration < config.maxIterations) {
       iteration++;
       const startTime = Date.now();
+
+      const resolved = this.registry.get(activeProvider);
       config.onProviderAttempt?.(activeProvider, iteration);
 
       let result: { stdout: string; stderr: string; exitCode: number; timedOut: boolean; cleanStdout: string };
       try {
-        result = await spawnIteration(config, activeProvider);
+        result = await spawnIteration(config, resolved);
       } catch (error) {
         const msg = error instanceof Error ? error.message : String(error);
         config.onSpawnError?.(activeProvider, msg);
@@ -382,20 +303,19 @@ export class RalphLoop {
       }
 
       const durationMs = Date.now() - startTime;
-      // For claude, use the pre-cleaned output from StreamLineBuffer.
-      // For codex, normalize the raw stdout (codex uses a different JSON format).
-      const normalizedStdout = activeProvider === 'codex'
-        ? normalizeCodexOutput(result.stdout)
-        : result.cleanStdout;
+      // For stream-json providers, use the pre-cleaned output from StreamLineBuffer.
+      // For non-stream-json providers, normalize the raw stdout via the provider.
+      const normalizedStdout = resolved.supportsStreamJson()
+        ? result.cleanStdout
+        : resolved.normalizeOutput(result.stdout);
       lastOutput = normalizedStdout;
 
-      const tokenDivisor = activeProvider === 'codex' ? 16 : 4;
-      const tokensEstimated = Math.ceil(normalizedStdout.length / tokenDivisor);
+      const tokensEstimated = resolved.estimateTokens(normalizedStdout);
       totalTokens += tokensEstimated;
 
       // Never treat timed-out iterations as rate-limited — the timeout killed the
       // process, any "rate limit" text in stdout is the model's code, not an API error.
-      const rateLimited = !result.timedOut && isRateLimited(result.stderr);
+      const rateLimited = !result.timedOut && resolved.isRateLimited(result.stderr);
       const promiseDetected = promiseRegex.test(normalizedStdout);
 
       const iterResult: IterationResult = {
@@ -439,11 +359,24 @@ export class RalphLoop {
         let shortestSleep = Infinity;
         let shortestSource = 'unknown';
 
-        for (const [, data] of exhaustedProviders) {
-          const parsed = parseResetTime(data.stderr, data.stdout);
-          if (parsed.sleepSeconds >= 0 && parsed.sleepSeconds < shortestSleep) {
-            shortestSleep = parsed.sleepSeconds;
-            shortestSource = parsed.source;
+        for (const [providerName, data] of exhaustedProviders) {
+          const providerImpl = this.registry.get(providerName);
+          const retryMs = providerImpl.parseRetryAfter(data.stderr);
+
+          if (retryMs !== undefined) {
+            // Provider-specific parsing succeeded (returns milliseconds)
+            const sleepSeconds = retryMs / 1000;
+            if (sleepSeconds >= 0 && sleepSeconds < shortestSleep) {
+              shortestSleep = sleepSeconds;
+              shortestSource = `${providerName} parseRetryAfter`;
+            }
+          } else {
+            // Fallback to generic parseResetTime
+            const parsed = parseResetTime(data.stderr, data.stdout);
+            if (parsed.sleepSeconds >= 0 && parsed.sleepSeconds < shortestSleep) {
+              shortestSleep = parsed.sleepSeconds;
+              shortestSource = parsed.source;
+            }
           }
         }
 

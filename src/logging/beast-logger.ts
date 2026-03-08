@@ -6,6 +6,7 @@
  * boxed headers, and service highlighting for verbose mode.
  */
 
+import { appendFileSync } from 'node:fs';
 import type { ILogger } from '../deps.js';
 
 // ── ANSI escape codes ──
@@ -191,7 +192,11 @@ export class BeastLogger implements ILogger {
     const now = new Date();
     const date = now.toISOString().slice(0, 10);
     const time = now.toTimeString().slice(0, 8);
-    this.entries.push(`[${date} ${time}] [${level}] ${stripAnsi(msg)}`);
+    const entry = `[${date} ${time}] [${level}] ${stripAnsi(msg)}`;
+    this.entries.push(entry);
+    if (this.logFile) {
+      appendFileSync(this.logFile, entry + '\n');
+    }
   }
 
   private withData(msg: string, data: unknown): string {

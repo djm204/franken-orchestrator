@@ -49,8 +49,6 @@ function baseConfig(overrides?: Partial<RalphLoopConfig>): RalphLoopConfig {
     maxIterations: 3,
     maxTurns: 10,
     provider: 'claude',
-    claudeCmd: 'claude',
-    codexCmd: 'codex',
     timeoutMs: 30_000,
     workingDir: '/tmp/test-project',
     ...overrides,
@@ -281,7 +279,7 @@ describe('RalphLoop — Rate Limit Resilience', () => {
     expect(result.completed).toBe(true);
     // Should have slept with shortest reset time (30s from claude)
     expect(sleepFn).toHaveBeenCalledWith(30_000);
-    expect(onSleep).toHaveBeenCalledWith(30_000, 'retry-after header');
+    expect(onSleep).toHaveBeenCalledWith(30_000, 'claude parseRetryAfter');
     // After sleep, resumes with original provider (claude)
     expect((mockSpawn.mock.calls[2] as unknown[])[0]).toBe('claude');
   });
@@ -355,7 +353,7 @@ describe('RalphLoop — Rate Limit Resilience', () => {
 
     expect(result.completed).toBe(true);
     expect(sleepFn).toHaveBeenCalledWith(0);
-    expect(onSleep).toHaveBeenCalledWith(0, 'retry-after header');
+    expect(onSleep).toHaveBeenCalledWith(0, 'claude parseRetryAfter');
   });
 
   // ── Exhausted state cleared after sleep ──
@@ -440,7 +438,7 @@ describe('RalphLoop — Rate Limit Resilience', () => {
     }));
 
     expect(onSleep).toHaveBeenCalledTimes(1);
-    expect(onSleep).toHaveBeenCalledWith(45_000, 'retry-after header');
+    expect(onSleep).toHaveBeenCalledWith(45_000, 'claude parseRetryAfter');
     // onSleep must fire BEFORE sleepFn
     const onSleepOrder = onSleep.mock.invocationCallOrder[0];
     const sleepOrder = sleepFn.mock.invocationCallOrder[0];

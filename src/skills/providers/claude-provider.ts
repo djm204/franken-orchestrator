@@ -10,7 +10,8 @@ import type { ICliProvider, ProviderOpts } from './cli-provider.js';
 const RATE_LIMIT_PATTERNS =
   /rate.?limit|429|too many requests|retry.?after|overloaded|capacity|temporarily unavailable|out of extra usage|usage limit|resets?\s+\d|resets?\s+in\s+\d+\s*s/i;
 
-function tryExtractTextFromNode(node: unknown, out: string[]): void {
+/** Recursively extract text from a stream-json node. Shared by processStreamLine. */
+export function tryExtractTextFromNode(node: unknown, out: string[]): void {
   if (typeof node === 'string') {
     if (node.trim().length > 0) out.push(node);
     return;

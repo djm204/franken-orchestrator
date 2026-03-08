@@ -1,4 +1,5 @@
-import { existsSync, unlinkSync, readdirSync, appendFileSync } from 'node:fs';
+import { existsSync, unlinkSync, readdirSync, mkdirSync } from 'node:fs';
+import { basename, resolve } from 'node:path';
 import { BeastLogger } from '../logging/beast-logger.js';
 import { RalphLoop } from '../skills/ralph-loop.js';
 import { GitBranchIsolator } from '../skills/git-branch-isolator.js';
@@ -81,14 +82,26 @@ function createStubSkills(planDir: string): ISkillsModule {
 export async function createCliDeps(options: CliDepOptions): Promise<CliDeps> {
   const { paths, baseBranch, budget, verbose, noPr, reset } = options;
 
+  // Derive plan name for plan-specific build artifacts
+  const planName = options.planDirOverride
+    ? basename(options.planDirOverride).replace(/\/$/, '')
+    : 'session';
+  const checkpointFile = resolve(paths.buildDir, `${planName}.checkpoint`);
+
   // Reset if requested
   if (reset) {
-    for (const f of [paths.checkpointFile, paths.tracesDb]) {
+    for (const f of [checkpointFile, paths.tracesDb]) {
       try { if (existsSync(f)) unlinkSync(f); } catch {}
     }
   }
 
-  const logger = new BeastLogger({ verbose, captureForFile: true });
+  // Build timestamped log file: .build/<plan-name>-<datetime>-build.log
+  const now = new Date();
+  const ts = now.toISOString().replace(/[:.]/g, '-').slice(0, 19); // 2026-03-08T20-12-05
+  const logFile = resolve(paths.buildDir, `${planName}-${ts}-build.log`);
+  mkdirSync(paths.buildDir, { recursive: true });
+
+  const logger = new BeastLogger({ verbose, captureForFile: true, logFile });
 
   // Observer
   const observerBridge = new CliObserverBridge({ budgetLimitUsd: budget });
@@ -101,7 +114,7 @@ export async function createCliDeps(options: CliDepOptions): Promise<CliDeps> {
   }
 
   // CLI execution stack
-  const checkpoint = new FileCheckpointStore(paths.checkpointFile);
+  const checkpoint = new FileCheckpointStore(checkpointFile);
   const ralph = new RalphLoop();
   const gitIso = new GitBranchIsolator({
     baseBranch,
@@ -142,9 +155,8 @@ export async function createCliDeps(options: CliDepOptions): Promise<CliDeps> {
     if (traceViewerHandle) {
       await traceViewerHandle.stop();
     }
-    for (const e of logger.getLogEntries()) {
-      appendFileSync(paths.logFile, e + '\n');
-    }
+    // Log entries are now written incrementally by BeastLogger (crash-safe).
+    // No batch write needed here.
   };
 
   const deps: BeastLoopDeps = {

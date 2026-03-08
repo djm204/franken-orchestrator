@@ -2,6 +2,8 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { EventEmitter } from 'node:events';
 import type { ChildProcess } from 'node:child_process';
 import type { RalphLoopConfig, IterationResult } from '../../../src/skills/cli-types.js';
+import { ProviderRegistry } from '../../../src/skills/providers/index.js';
+import type { ICliProvider } from '../../../src/skills/providers/index.js';
 
 vi.mock('node:child_process', () => ({
   spawn: vi.fn(),
@@ -51,8 +53,6 @@ function baseConfig(overrides?: Partial<RalphLoopConfig>): RalphLoopConfig {
     maxIterations: 3,
     maxTurns: 10,
     provider: 'claude',
-    claudeCmd: 'claude',
-    codexCmd: 'codex',
     timeoutMs: 30_000,
     workingDir: '/tmp/test-project',
     ...overrides,
@@ -168,7 +168,7 @@ describe('RalphLoop', () => {
     queueMock({ stdout: 'ok\n<promise>IMPL_X_DONE</promise>', exitCode: 0 });
 
     const loop = new RalphLoop();
-    await loop.run(baseConfig({ provider: 'claude', claudeCmd: '/usr/bin/claude' }));
+    await loop.run(baseConfig({ provider: 'claude', command: '/usr/bin/claude' }));
 
     expect(mockSpawn).toHaveBeenCalledWith(
       '/usr/bin/claude',
@@ -195,7 +195,7 @@ describe('RalphLoop', () => {
     queueMock({ stdout: 'ok\n<promise>IMPL_X_DONE</promise>', exitCode: 0 });
 
     const loop = new RalphLoop();
-    await loop.run(baseConfig({ provider: 'codex', codexCmd: '/usr/bin/codex' }));
+    await loop.run(baseConfig({ provider: 'codex', command: '/usr/bin/codex' }));
 
     expect(mockSpawn).toHaveBeenCalledWith(
       '/usr/bin/codex',
@@ -312,14 +312,14 @@ describe('RalphLoop', () => {
     expect(onRateLimit).toHaveBeenCalledWith('claude');
     expect(result.completed).toBe(true);
 
-    // Second call should use codex
+    // Second call should use codex provider's command
     const secondCallArgs = mockSpawn.mock.calls[1] as unknown[];
     expect(secondCallArgs[0]).toBe('codex');
   });
 
-  // ── 10. Strips CLAUDECODE env var for claude provider ──
+  // ── 10. Strips CLAUDE* env vars for claude provider ──
 
-  it('strips CLAUDECODE env var when spawning claude', async () => {
+  it('strips CLAUDE* env vars when spawning claude via provider filterEnv', async () => {
     process.env['CLAUDECODE'] = 'some-value';
 
     queueMock({ stdout: 'ok\n<promise>IMPL_X_DONE</promise>', exitCode: 0 });
@@ -333,9 +333,9 @@ describe('RalphLoop', () => {
     delete process.env['CLAUDECODE'];
   });
 
-  // ── 11. Token estimation ──
+  // ── 11. Token estimation via provider ──
 
-  it('estimates tokens as stdout.length / 4 for claude and / 16 for codex', async () => {
+  it('estimates tokens via provider: /4 for claude, /16 for codex', async () => {
     const output = 'x'.repeat(160) + '\n<promise>IMPL_X_DONE</promise>';
 
     queueMock({ stdout: output, exitCode: 0 });
@@ -391,5 +391,42 @@ describe('RalphLoop', () => {
       const result = await loop.run(baseConfig({ maxIterations: 1 }));
       expect(result.completed).toBe(true);
     }
+  });
+
+  // ── 14. Accepts custom provider via registry ──
+
+  it('accepts custom provider via registry', async () => {
+    const customProvider: ICliProvider = {
+      name: 'custom',
+      command: 'my-custom-agent',
+      buildArgs: () => ['--auto'],
+      normalizeOutput: (raw) => raw.trim(),
+      estimateTokens: (text) => text.length,
+      isRateLimited: () => false,
+      parseRetryAfter: () => undefined,
+      filterEnv: (env) => ({ ...env }),
+      supportsStreamJson: () => false,
+    };
+
+    const registry = new ProviderRegistry();
+    registry.register(customProvider);
+
+    queueMock({ stdout: 'custom output\n<promise>IMPL_X_DONE</promise>', exitCode: 0 });
+
+    const loop = new RalphLoop(registry);
+    const result = await loop.run(baseConfig({ provider: 'custom' }));
+
+    expect(result.completed).toBe(true);
+    expect(result.output).toContain('custom output');
+    expect(mockSpawn).toHaveBeenCalledWith(
+      'my-custom-agent',
+      ['--auto', 'Implement feature X'],
+      expect.objectContaining({
+        stdio: ['ignore', 'pipe', 'pipe'],
+        cwd: '/tmp/test-project',
+      }),
+    );
+    // Custom provider estimates tokens as text.length (not /4)
+    expect(result.tokensUsed).toBeGreaterThan(0);
   });
 });
