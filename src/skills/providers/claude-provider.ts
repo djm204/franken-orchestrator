@@ -63,7 +63,9 @@ export class ClaudeProvider implements ICliProvider {
   }
 
   normalizeOutput(raw: string): string {
-    const lines = raw.split('\n');
+    // Strip hook output blocks (multi-line formatted JSON containing hookSpecificOutput)
+    const cleaned = raw.replace(/\{[\s\S]*?"hookSpecificOutput"[\s\S]*?\n\}/g, '');
+    const lines = cleaned.split('\n');
     const extracted: string[] = [];
 
     for (const line of lines) {

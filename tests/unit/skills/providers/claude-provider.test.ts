@@ -147,4 +147,41 @@ describe('ClaudeProvider', () => {
   it('normalizeOutput passes through plain text', () => {
     expect(provider.normalizeOutput('plain text output')).toBe('plain text output');
   });
+
+  // -- hook output filtering ------------------------------------------------
+
+  it('normalizeOutput skips multi-line hook output mixed with real content', () => {
+    // Hook output is formatted JSON spanning multiple lines
+    const raw = [
+      '{',
+      '  "hookSpecificOutput": {',
+      '    "hookEventName": "SessionStart",',
+      '    "additionalContext": "<EXTREMELY_IMPORTANT>Use superpowers</EXTREMELY_IMPORTANT>"',
+      '  }',
+      '}',
+      JSON.stringify({ delta: { text: 'actual LLM response' } }),
+    ].join('\n');
+
+    const result = provider.normalizeOutput(raw);
+
+    expect(result).toContain('actual LLM response');
+    expect(result).not.toContain('hookSpecificOutput');
+    expect(result).not.toContain('EXTREMELY_IMPORTANT');
+    expect(result).not.toContain('SessionStart');
+  });
+
+  it('normalizeOutput handles response that is only hook output', () => {
+    const raw = [
+      '{',
+      '  "hookSpecificOutput": {',
+      '    "hookEventName": "SessionStart",',
+      '    "additionalContext": "huge plugin prompt"',
+      '  }',
+      '}',
+    ].join('\n');
+
+    const result = provider.normalizeOutput(raw);
+
+    expect(result).toBe('');
+  });
 });

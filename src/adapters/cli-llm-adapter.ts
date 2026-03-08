@@ -157,7 +157,10 @@ export class CliLlmAdapter implements IAdapter {
   }
 
   private parseStreamJson(raw: string): { content: string | null } {
-    const lines = raw.split('\n').map((l) => l.trim()).filter((l) => l.length > 0);
+    // Strip hook output blocks (multi-line formatted JSON containing hookSpecificOutput)
+    const cleaned = raw.replace(/\{[\s\S]*?"hookSpecificOutput"[\s\S]*?\n\}/g, '');
+    if (cleaned.trim().length === 0) return { content: '' };
+    const lines = cleaned.split('\n').map((l) => l.trim()).filter((l) => l.length > 0);
     const extracted: string[] = [];
     let parsedJsonLines = 0;
 

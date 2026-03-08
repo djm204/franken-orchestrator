@@ -328,6 +328,42 @@ describe('CliLlmAdapter', () => {
         const result = adapter.transformResponse(json, 'req-1');
         expect(result.content).toContain('full response');
       });
+
+      it('filters out multi-line hookSpecificOutput from stream-json', () => {
+        const adapter = new CliLlmAdapter(claudeProvider, baseOpts);
+        const raw = [
+          '{',
+          '  "hookSpecificOutput": {',
+          '    "hookEventName": "SessionStart",',
+          '    "additionalContext": "<EXTREMELY_IMPORTANT>skill prompt</EXTREMELY_IMPORTANT>"',
+          '  }',
+          '}',
+          '{"type":"content_block_delta","delta":{"type":"text_delta","text":"actual response"}}',
+        ].join('\n');
+
+        const result = adapter.transformResponse(raw, 'req-1');
+
+        expect(result.content).toContain('actual response');
+        expect(result.content).not.toContain('hookSpecificOutput');
+        expect(result.content).not.toContain('EXTREMELY_IMPORTANT');
+      });
+
+      it('returns empty content when response is only hook output', () => {
+        const adapter = new CliLlmAdapter(claudeProvider, baseOpts);
+        const raw = [
+          '{',
+          '  "hookSpecificOutput": {',
+          '    "hookEventName": "SessionStart",',
+          '    "additionalContext": "plugin prompt"',
+          '  }',
+          '}',
+        ].join('\n');
+
+        const result = adapter.transformResponse(raw, 'req-1');
+
+        expect(result.content).not.toContain('hookSpecificOutput');
+        expect(result.content).not.toContain('plugin prompt');
+      });
     });
 
     describe('non-stream-json path (supportsStreamJson=false, CodexProvider)', () => {
