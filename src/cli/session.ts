@@ -19,7 +19,7 @@ export interface SessionConfig {
   paths: ProjectPaths;
   baseBranch: string;
   budget: number;
-  provider: 'claude' | 'codex';
+  provider: string;
   noPr: boolean;
   verbose: boolean;
   reset: boolean;
@@ -261,6 +261,7 @@ export class Session {
       noPr: this.config.noPr,
       verbose: this.config.verbose,
       reset: this.config.reset,
+      planDirOverride: this.config.planDirOverride,
     };
   }
 }

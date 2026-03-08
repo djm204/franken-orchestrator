@@ -121,16 +121,20 @@ function highlightServices(msg: string): string {
 export interface BeastLoggerOptions {
   readonly verbose: boolean;
   readonly captureForFile?: boolean;
+  /** When set, log entries are appended to this file immediately (crash-safe). */
+  readonly logFile?: string | undefined;
 }
 
 export class BeastLogger implements ILogger {
   private readonly verbose: boolean;
   private readonly captureForFile: boolean;
+  private readonly logFile: string | undefined;
   private readonly entries: string[] = [];
 
   constructor(options: BeastLoggerOptions) {
     this.verbose = options.verbose;
     this.captureForFile = options.captureForFile ?? false;
+    this.logFile = options.logFile;
   }
 
   info(msg: string, dataOrSource?: unknown, source?: string): void {
@@ -197,7 +201,7 @@ export class BeastLogger implements ILogger {
 
   private withBadgeAndData(msg: string, data: unknown, source: string | undefined): string {
     const badge = source ? `[${source}] ` : '';
-    const body = data !== undefined ? `${msg} | ${safeStringify(data)}` : msg;
+    const body = data !== undefined ? `${msg} | ${safePrettyStringify(data)}` : msg;
     return `${badge}${body}`;
   }
 }
@@ -207,6 +211,23 @@ export { A as ANSI };
 function safeStringify(value: unknown): string {
   try {
     return JSON.stringify(value, (_key, v) => typeof v === 'bigint' ? v.toString() : v);
+  } catch {
+    return String(value);
+  }
+}
+
+/** Pretty-print for build.log — truncates long string values to keep logs readable. */
+function safePrettyStringify(value: unknown): string {
+  const MAX_STRING_LEN = 200;
+  try {
+    const pretty = JSON.stringify(value, (_key, v) => {
+      if (typeof v === 'bigint') return v.toString();
+      if (typeof v === 'string' && v.length > MAX_STRING_LEN) {
+        return v.slice(0, MAX_STRING_LEN) + `... (${v.length} chars)`;
+      }
+      return v;
+    }, 2);
+    return pretty;
   } catch {
     return String(value);
   }

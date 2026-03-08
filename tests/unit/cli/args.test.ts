@@ -51,9 +51,9 @@ describe('parseArgs', () => {
     expect(args.reset).toBe(true);
   });
 
-  it('defaults provider to claude for unknown values', () => {
+  it('accepts any string as provider (no longer restricted to union)', () => {
     const args = parseArgs(['--provider', 'unknown']);
-    expect(args.provider).toBe('claude');
+    expect(args.provider).toBe('unknown');
   });
 
   it('parses --design-doc without subcommand', () => {

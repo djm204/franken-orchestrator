@@ -25,15 +25,13 @@ describe('SkillDescriptor.executionType', () => {
 });
 
 describe('RalphLoopConfig', () => {
-  it('has all required readonly properties', () => {
+  it('has all required readonly properties (without claudeCmd/codexCmd)', () => {
     const config: RalphLoopConfig = {
       prompt: 'Implement feature X',
       promiseTag: 'IMPL_X_DONE',
       maxIterations: 5,
       maxTurns: 50,
       provider: 'claude',
-      claudeCmd: 'claude',
-      codexCmd: 'codex',
       timeoutMs: 300_000,
     };
 
@@ -42,13 +40,56 @@ describe('RalphLoopConfig', () => {
     expect(config.maxIterations).toBe(5);
     expect(config.maxTurns).toBe(50);
     expect(config.provider).toBe('claude');
-    expect(config.claudeCmd).toBe('claude');
-    expect(config.codexCmd).toBe('codex');
     expect(config.timeoutMs).toBe(300_000);
   });
 
-  it('restricts provider to claude or codex', () => {
-    expectTypeOf<RalphLoopConfig['provider']>().toEqualTypeOf<'claude' | 'codex'>();
+  it('accepts any string as provider (not union)', () => {
+    expectTypeOf<RalphLoopConfig['provider']>().toEqualTypeOf<string>();
+    const config: RalphLoopConfig = {
+      prompt: 'test',
+      promiseTag: 'TEST',
+      maxIterations: 1,
+      maxTurns: 10,
+      provider: 'gemini',
+      timeoutMs: 60_000,
+    };
+    expect(config.provider).toBe('gemini');
+  });
+
+  it('has optional command field replacing claudeCmd/codexCmd', () => {
+    const withCommand: RalphLoopConfig = {
+      prompt: 'test',
+      promiseTag: 'TEST',
+      maxIterations: 1,
+      maxTurns: 10,
+      provider: 'aider',
+      command: '/usr/local/bin/aider',
+      timeoutMs: 60_000,
+    };
+    expect(withCommand.command).toBe('/usr/local/bin/aider');
+
+    const withoutCommand: RalphLoopConfig = {
+      prompt: 'test',
+      promiseTag: 'TEST',
+      maxIterations: 1,
+      maxTurns: 10,
+      provider: 'claude',
+      timeoutMs: 60_000,
+    };
+    expect(withoutCommand.command).toBeUndefined();
+  });
+
+  it('accepts providers as readonly string array', () => {
+    const config: RalphLoopConfig = {
+      prompt: 'test',
+      promiseTag: 'TEST',
+      maxIterations: 1,
+      maxTurns: 10,
+      provider: 'claude',
+      timeoutMs: 60_000,
+      providers: ['claude', 'gemini', 'aider'],
+    };
+    expect(config.providers).toEqual(['claude', 'gemini', 'aider']);
   });
 
   it('has readonly properties', () => {
@@ -106,8 +147,6 @@ describe('CliSkillConfig', () => {
         maxIterations: 3,
         maxTurns: 30,
         provider: 'codex',
-        claudeCmd: 'claude',
-        codexCmd: 'codex',
         timeoutMs: 60_000,
       },
       git: {
@@ -131,8 +170,6 @@ describe('CliSkillConfig', () => {
         maxIterations: 3,
         maxTurns: 30,
         provider: 'claude',
-        claudeCmd: 'claude',
-        codexCmd: 'codex',
         timeoutMs: 60_000,
       },
       git: {

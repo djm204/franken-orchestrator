@@ -228,8 +228,7 @@ export class CliSkillExecutor {
       maxIterations: 10,
       maxTurns: 25,
       provider: 'claude',
-      claudeCmd: 'claude',
-      codexCmd: 'codex',
+      command: 'claude',
       timeoutMs: 600_000,
       workingDir: this.git.getWorkingDir(),
     };
@@ -292,11 +291,12 @@ export class CliSkillExecutor {
           sleepMs: result.sleepMs,
         }, 'ralph');
         // Full raw output -> build.log only (via debug, always captured)
+        // Embed as multi-line text (not JSON) so newlines are preserved in build.log
         if (result.stderr) {
-          this.logger?.debug(`RalphLoop: iter ${iteration} stderr`, { chunkId, stderr: result.stderr }, 'ralph');
+          this.logger?.debug(`RalphLoop: iter ${iteration} stderr [${chunkId}]:\n${result.stderr}`, undefined, 'ralph');
         }
         if (result.stdout) {
-          this.logger?.debug(`RalphLoop: iter ${iteration} stdout`, { chunkId, stdout: result.stdout.slice(0, 4000) }, 'ralph');
+          this.logger?.debug(`RalphLoop: iter ${iteration} stdout [${chunkId}] (${result.stdout.length} chars):\n${result.stdout.slice(0, 4000)}`, undefined, 'ralph');
         }
         // Surface errors on terminal when iteration fails (non-rate-limit)
         if (result.exitCode !== 0 && !result.rateLimited) {

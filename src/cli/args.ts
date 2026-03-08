@@ -7,7 +7,8 @@ export interface CliArgs {
   baseDir: string;
   baseBranch?: string | undefined;
   budget: number;
-  provider: 'claude' | 'codex';
+  provider: string;
+  providers?: string[] | undefined;
   designDoc?: string | undefined;
   planDir?: string | undefined;
   noPr: boolean;
@@ -32,7 +33,8 @@ Options:
   --base-dir <path>       Project root (default: cwd)
   --base-branch <name>    Git base branch (default: main)
   --budget <usd>          Budget limit in USD (default: 10)
-  --provider <name>       claude | codex (default: claude)
+  --provider <name>       Provider name (default: claude)
+  --providers <list>      Comma-separated fallback chain (e.g. claude,gemini,aider)
   --design-doc <path>     Path to design document
   --plan-dir <path>       Path to chunk files directory
   --config <path>         Path to config file (JSON)
@@ -73,6 +75,7 @@ export function parseArgs(argv: string[] = process.argv.slice(2)): CliArgs {
       'base-branch': { type: 'string' },
       budget: { type: 'string' },
       provider: { type: 'string' },
+      providers: { type: 'string' },
       'design-doc': { type: 'string' },
       'plan-dir': { type: 'string' },
       config: { type: 'string' },
@@ -85,8 +88,12 @@ export function parseArgs(argv: string[] = process.argv.slice(2)): CliArgs {
     strict: true,
   });
 
-  const providerRaw = values.provider?.toLowerCase();
-  const provider = providerRaw === 'codex' ? 'codex' : 'claude';
+  const provider = values.provider?.toLowerCase() ?? 'claude';
+
+  const providersRaw = values.providers;
+  const providers = providersRaw
+    ? providersRaw.split(',').map((p) => p.trim().toLowerCase())
+    : undefined;
 
   return {
     subcommand,
@@ -94,6 +101,7 @@ export function parseArgs(argv: string[] = process.argv.slice(2)): CliArgs {
     baseBranch: values['base-branch'],
     budget: values.budget ? parseFloat(values.budget) : 10,
     provider,
+    providers,
     designDoc: values['design-doc'],
     planDir: values['plan-dir'],
     config: values.config,

@@ -247,10 +247,10 @@ export function normalizeCodexOutput(stdout: string): string {
 
 function spawnIteration(
   config: RalphLoopConfig,
-  provider: 'claude' | 'codex',
+  provider: string,
 ): Promise<{ stdout: string; stderr: string; exitCode: number; timedOut: boolean; cleanStdout: string }> {
   return new Promise((resolve, reject) => {
-    const cmd = provider === 'claude' ? config.claudeCmd : config.codexCmd;
+    const cmd = config.command ?? provider;
     const args = provider === 'claude'
       ? buildClaudeArgs(config.prompt, config.maxTurns)
       : buildCodexArgs(config.prompt);
@@ -350,11 +350,9 @@ function spawnIteration(
 
 export class RalphLoop {
   async run(config: RalphLoopConfig): Promise<RalphLoopResult> {
-    const configuredProviders = config.providers?.filter((provider): provider is 'claude' | 'codex' =>
-      provider === 'claude' || provider === 'codex');
-    const providers: readonly ('claude' | 'codex')[] =
-      configuredProviders && configuredProviders.length > 0
-        ? configuredProviders
+    const providers: readonly string[] =
+      config.providers && config.providers.length > 0
+        ? config.providers
         : ['claude', 'codex'];
     const sleepFn = config._sleepFn ?? defaultSleep;
     const initialProvider = config.provider;
@@ -362,7 +360,7 @@ export class RalphLoop {
     let iteration = 0;
     let lastOutput = '';
     let totalTokens = 0;
-    let activeProvider: 'claude' | 'codex' = config.provider;
+    let activeProvider: string = config.provider;
     let pendingSleepMs = 0;
     const promiseRegex = new RegExp(`<promise>${escapeRegex(config.promiseTag)}</promise>`);
 

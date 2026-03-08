@@ -21,10 +21,11 @@ export interface CliDepOptions {
   paths: ProjectPaths;
   baseBranch: string;
   budget: number;
-  provider: 'claude' | 'codex';
+  provider: string;
   noPr: boolean;
   verbose: boolean;
   reset: boolean;
+  planDirOverride?: string | undefined;
 }
 
 export interface CliDeps {
@@ -109,7 +110,8 @@ export async function createCliDeps(options: CliDepOptions): Promise<CliDeps> {
     workingDir: paths.root,
   });
   const cliLlmAdapter = new CliLlmAdapter({
-    provider: options.provider,
+    // Cast until cli-llm-adapter.ts is refactored in chunk 04-05
+    provider: options.provider as 'claude' | 'codex',
     workingDir: paths.root,
   });
 
@@ -147,7 +149,7 @@ export async function createCliDeps(options: CliDepOptions): Promise<CliDeps> {
 
   const deps: BeastLoopDeps = {
     firewall: stubFirewall,
-    skills: createStubSkills(paths.plansDir),
+    skills: createStubSkills(options.planDirOverride ?? paths.plansDir),
     memory: stubMemory,
     planner: stubPlanner,
     observer: observerBridge,

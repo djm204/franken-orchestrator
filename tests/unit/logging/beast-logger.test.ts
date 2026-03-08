@@ -280,8 +280,8 @@ describe('BeastLogger', () => {
       const entries = logger.getLogEntries();
       expect(entries).toHaveLength(1);
       expect(entries[0]).toContain('Execution: task failed');
-      expect(entries[0]).toContain('"taskId":"impl:11_rate_limit_resilience"');
-      expect(entries[0]).toContain('"error":"boom"');
+      expect(entries[0]).toContain('"taskId": "impl:11_rate_limit_resilience"');
+      expect(entries[0]).toContain('"error": "boom"');
     });
   });
 

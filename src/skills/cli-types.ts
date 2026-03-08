@@ -20,13 +20,12 @@ export interface RalphLoopConfig {
   readonly promiseTag: string;
   readonly maxIterations: number;
   readonly maxTurns: number;
-  readonly provider: 'claude' | 'codex';
-  readonly claudeCmd: string;
-  readonly codexCmd: string;
+  readonly provider: string;
+  readonly command?: string | undefined;
   readonly timeoutMs: number;
   readonly workingDir?: string | undefined;
   readonly abortSignal?: AbortSignal | undefined;
-  readonly providers?: readonly ('claude' | 'codex')[] | undefined;
+  readonly providers?: readonly string[] | undefined;
   readonly onRateLimit?: ((provider: string) => string | undefined) | undefined;
   readonly onIteration?: ((iteration: number, result: IterationResult) => void) | undefined;
   readonly onSleep?: ((durationMs: number, source: string) => void) | undefined;

@@ -94,6 +94,10 @@ export type {
   IterationResult,
 } from './skills/cli-types.js';
 
+// CLI providers
+export type { ICliProvider, ProviderOpts } from './skills/providers/index.js';
+export { ProviderRegistry, createDefaultRegistry } from './skills/providers/index.js';
+
 // Checkpoint
 export { FileCheckpointStore } from './checkpoint/file-checkpoint-store.js';
 
