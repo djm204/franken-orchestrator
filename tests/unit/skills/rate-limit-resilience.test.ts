@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { EventEmitter } from 'node:events';
 import type { ChildProcess } from 'node:child_process';
-import type { RalphLoopConfig, IterationResult } from '../../../src/skills/cli-types.js';
+import type { MartinLoopConfig, IterationResult } from '../../../src/skills/cli-types.js';
 
 vi.mock('node:child_process', () => ({
   spawn: vi.fn(),
@@ -42,7 +42,7 @@ function queueMock(opts: MockChildOpts): void {
   mockSpawn.mockImplementationOnce(() => mockChild(opts));
 }
 
-function baseConfig(overrides?: Partial<RalphLoopConfig>): RalphLoopConfig {
+function baseConfig(overrides?: Partial<MartinLoopConfig>): MartinLoopConfig {
   return {
     prompt: 'Implement feature X',
     promiseTag: 'IMPL_X_DONE',
@@ -56,10 +56,10 @@ function baseConfig(overrides?: Partial<RalphLoopConfig>): RalphLoopConfig {
 }
 
 describe('parseResetTime', () => {
-  let parseResetTime: typeof import('../../../src/skills/ralph-loop.js').parseResetTime;
+  let parseResetTime: typeof import('../../../src/skills/martin-loop.js').parseResetTime;
 
   beforeEach(async () => {
-    const mod = await import('../../../src/skills/ralph-loop.js');
+    const mod = await import('../../../src/skills/martin-loop.js');
     parseResetTime = mod.parseResetTime;
   });
 
@@ -158,15 +158,15 @@ describe('parseResetTime', () => {
   });
 });
 
-describe('RalphLoop — Rate Limit Resilience', () => {
-  let RalphLoop: typeof import('../../../src/skills/ralph-loop.js').RalphLoop;
+describe('MartinLoop — Rate Limit Resilience', () => {
+  let MartinLoop: typeof import('../../../src/skills/martin-loop.js').MartinLoop;
   let stdoutWriteSpy: ReturnType<typeof vi.spyOn>;
 
   beforeEach(async () => {
     vi.resetAllMocks();
     stdoutWriteSpy = vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
-    const mod = await import('../../../src/skills/ralph-loop.js');
-    RalphLoop = mod.RalphLoop;
+    const mod = await import('../../../src/skills/martin-loop.js');
+    MartinLoop = mod.MartinLoop;
   });
 
   afterEach(() => {
@@ -181,7 +181,7 @@ describe('RalphLoop — Rate Limit Resilience', () => {
     queueMock({ stderr: '429 Too Many Requests', exitCode: 1 });
     queueMock({ stdout: 'Codex did it!\n<promise>IMPL_X_DONE</promise>', exitCode: 0 });
 
-    const loop = new RalphLoop();
+    const loop = new MartinLoop();
     const result = await loop.run(baseConfig({
       maxIterations: 1,
       providers: ['claude', 'codex'],
@@ -198,7 +198,7 @@ describe('RalphLoop — Rate Limit Resilience', () => {
     queueMock({ stderr: 'request quota exceeded; resets in 9s', exitCode: 1 });
     queueMock({ stdout: 'Codex recovered\n<promise>IMPL_X_DONE</promise>', exitCode: 0 });
 
-    const loop = new RalphLoop();
+    const loop = new MartinLoop();
     const result = await loop.run(baseConfig({
       maxIterations: 1,
       providers: ['claude', 'codex'],
@@ -214,7 +214,7 @@ describe('RalphLoop — Rate Limit Resilience', () => {
     queueMock({ stderr: `x-ratelimit-reset: ${futureEpochSecs}`, exitCode: 1 });
     queueMock({ stdout: 'Codex recovered\n<promise>IMPL_X_DONE</promise>', exitCode: 0 });
 
-    const loop = new RalphLoop();
+    const loop = new MartinLoop();
     const result = await loop.run(baseConfig({
       maxIterations: 1,
       providers: ['claude', 'codex'],
@@ -230,7 +230,7 @@ describe('RalphLoop — Rate Limit Resilience', () => {
     queueMock({ stderr: 'rate limit exceeded', exitCode: 1 });
     queueMock({ stdout: 'Done!\n<promise>IMPL_X_DONE</promise>', exitCode: 0 });
 
-    const loop = new RalphLoop();
+    const loop = new MartinLoop();
     const result = await loop.run(baseConfig({ maxIterations: 1 }));
 
     expect(result.completed).toBe(true);
@@ -243,7 +243,7 @@ describe('RalphLoop — Rate Limit Resilience', () => {
     queueMock({ stdout: 'Done!\n<promise>IMPL_X_DONE</promise>', exitCode: 0 });
 
     const sleepFn = vi.fn().mockResolvedValue(undefined);
-    const loop = new RalphLoop();
+    const loop = new MartinLoop();
     const result = await loop.run(baseConfig({
       maxIterations: 1,
       providers: [],
@@ -268,7 +268,7 @@ describe('RalphLoop — Rate Limit Resilience', () => {
     // After sleep, claude succeeds
     queueMock({ stdout: 'Success!\n<promise>IMPL_X_DONE</promise>', exitCode: 0 });
 
-    const loop = new RalphLoop();
+    const loop = new MartinLoop();
     const result = await loop.run(baseConfig({
       maxIterations: 1,
       providers: ['claude', 'codex'],
@@ -297,7 +297,7 @@ describe('RalphLoop — Rate Limit Resilience', () => {
     // After sleep, claude succeeds
     queueMock({ stdout: 'ok!\n<promise>IMPL_X_DONE</promise>', exitCode: 0 });
 
-    const loop = new RalphLoop();
+    const loop = new MartinLoop();
     await loop.run(baseConfig({
       maxIterations: 1,
       providers: ['claude', 'codex'],
@@ -324,7 +324,7 @@ describe('RalphLoop — Rate Limit Resilience', () => {
     // After sleep, claude succeeds
     queueMock({ stdout: 'ok\n<promise>IMPL_X_DONE</promise>', exitCode: 0 });
 
-    const loop = new RalphLoop();
+    const loop = new MartinLoop();
     await loop.run(baseConfig({
       maxIterations: 1,
       providers: ['claude', 'codex'],
@@ -343,7 +343,7 @@ describe('RalphLoop — Rate Limit Resilience', () => {
     queueMock({ stderr: 'retry-after: 5', exitCode: 1 });
     queueMock({ stdout: 'ok\n<promise>IMPL_X_DONE</promise>', exitCode: 0 });
 
-    const loop = new RalphLoop();
+    const loop = new MartinLoop();
     const result = await loop.run(baseConfig({
       maxIterations: 1,
       providers: ['claude', 'codex'],
@@ -369,7 +369,7 @@ describe('RalphLoop — Rate Limit Resilience', () => {
     // Second iteration: claude succeeds with promise
     queueMock({ stdout: 'done\n<promise>IMPL_X_DONE</promise>', exitCode: 0 });
 
-    const loop = new RalphLoop();
+    const loop = new MartinLoop();
     const result = await loop.run(baseConfig({
       maxIterations: 2,
       providers: ['claude', 'codex'],
@@ -389,7 +389,7 @@ describe('RalphLoop — Rate Limit Resilience', () => {
     const onIteration = vi.fn();
     queueMock({ stdout: 'ok\n<promise>IMPL_X_DONE</promise>', exitCode: 0 });
 
-    const loop = new RalphLoop();
+    const loop = new MartinLoop();
     await loop.run(baseConfig({ onIteration }));
 
     const iterResult = (onIteration.mock.calls[0] as [number, IterationResult])[1];
@@ -406,7 +406,7 @@ describe('RalphLoop — Rate Limit Resilience', () => {
     // After sleep: success
     queueMock({ stdout: 'ok\n<promise>IMPL_X_DONE</promise>', exitCode: 0 });
 
-    const loop = new RalphLoop();
+    const loop = new MartinLoop();
     await loop.run(baseConfig({
       maxIterations: 1,
       providers: ['claude', 'codex'],
@@ -429,7 +429,7 @@ describe('RalphLoop — Rate Limit Resilience', () => {
     queueMock({ stderr: 'retry-after: 90', exitCode: 1 });
     queueMock({ stdout: 'ok\n<promise>IMPL_X_DONE</promise>', exitCode: 0 });
 
-    const loop = new RalphLoop();
+    const loop = new MartinLoop();
     await loop.run(baseConfig({
       maxIterations: 1,
       providers: ['claude', 'codex'],
@@ -453,7 +453,7 @@ describe('RalphLoop — Rate Limit Resilience', () => {
     queueMock({ stderr: 'rate limit exceeded', exitCode: 1 });
     queueMock({ stdout: 'ok\n<promise>IMPL_X_DONE</promise>', exitCode: 0 });
 
-    const loop = new RalphLoop();
+    const loop = new MartinLoop();
     const result = await loop.run(baseConfig({
       maxIterations: 1,
       onRateLimit,
@@ -470,7 +470,7 @@ describe('RalphLoop — Rate Limit Resilience', () => {
     queueMock({ stderr: 'rate limit exceeded', exitCode: 1 });
     queueMock({ stdout: 'ok\n<promise>IMPL_X_DONE</promise>', exitCode: 0 });
 
-    const loop = new RalphLoop();
+    const loop = new MartinLoop();
     const result = await loop.run(baseConfig({
       maxIterations: 1,
       providers: ['claude', 'codex'],
@@ -490,7 +490,7 @@ describe('RalphLoop — Rate Limit Resilience', () => {
     queueMock({ stderr: 'retry-after: 20', exitCode: 1 });
     queueMock({ stdout: 'ok\n<promise>IMPL_X_DONE</promise>', exitCode: 0 });
 
-    const loop = new RalphLoop();
+    const loop = new MartinLoop();
     const result = await loop.run(baseConfig({
       maxIterations: 1,
       providers: ['claude'],
@@ -519,7 +519,7 @@ describe('RalphLoop — Rate Limit Resilience', () => {
     // Back to claude for iteration 2 (maxIter is 2)
     queueMock({ stdout: 'iter 2\n<promise>IMPL_X_DONE</promise>', exitCode: 0 });
 
-    const loop = new RalphLoop();
+    const loop = new MartinLoop();
     const result = await loop.run(baseConfig({
       maxIterations: 2,
       providers: ['claude', 'codex'],
@@ -541,7 +541,7 @@ describe('RalphLoop — Rate Limit Resilience', () => {
     // After sleep: success with promise
     queueMock({ stdout: 'done\n<promise>IMPL_X_DONE</promise>', exitCode: 0 });
 
-    const loop = new RalphLoop();
+    const loop = new MartinLoop();
     const result = await loop.run(baseConfig({
       maxIterations: 1,
       providers: ['claude', 'codex'],
@@ -559,7 +559,7 @@ describe('RalphLoop — Rate Limit Resilience', () => {
     queueMock({ stderr: 'retry-after: 60', exitCode: 1 });
     queueMock({ stderr: 'retry-after: 60', exitCode: 1 });
 
-    const loop = new RalphLoop();
+    const loop = new MartinLoop();
     const runPromise = loop.run(baseConfig({
       maxIterations: 1,
       providers: ['claude', 'codex'],
@@ -580,7 +580,7 @@ describe('RalphLoop — Rate Limit Resilience', () => {
     queueMock({ stderr: 'retry-after: 120', exitCode: 1 });
     queueMock({ stderr: 'retry-after: 120', exitCode: 1 });
 
-    const loop = new RalphLoop();
+    const loop = new MartinLoop();
     const runPromise = loop.run(baseConfig({
       maxIterations: 1,
       providers: ['claude', 'codex'],
@@ -630,7 +630,7 @@ describe('RalphLoop — Rate Limit Resilience', () => {
 
     const onRateLimit = vi.fn();
     const onIteration = vi.fn();
-    const loop = new RalphLoop();
+    const loop = new MartinLoop();
     const runPromise = loop.run(baseConfig({
       maxIterations: 2,
       timeoutMs: 1_000,
@@ -661,7 +661,7 @@ describe('RalphLoop — Rate Limit Resilience', () => {
     });
 
     const onRateLimit = vi.fn();
-    const loop = new RalphLoop();
+    const loop = new MartinLoop();
     const result = await loop.run(baseConfig({ onRateLimit }));
 
     expect(result.completed).toBe(true);

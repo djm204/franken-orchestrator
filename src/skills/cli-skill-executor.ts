@@ -1,7 +1,7 @@
 import { execSync } from 'node:child_process';
-import type { RalphLoopConfig, RalphLoopResult, IterationResult, CliSkillConfig } from './cli-types.js';
+import type { MartinLoopConfig, MartinLoopResult, IterationResult, CliSkillConfig } from './cli-types.js';
 import type { SkillInput, SkillResult, ICheckpointStore, ILogger } from '../deps.js';
-import type { RalphLoop } from './ralph-loop.js';
+import type { MartinLoop } from './martin-loop.js';
 import type { GitBranchIsolator } from './git-branch-isolator.js';
 
 // ── Number formatting ──
@@ -20,7 +20,7 @@ export function formatIterationProgress(opts: {
   tokensEstimated?: number;
 }): string {
   const parts = [
-    `[ralph] Iteration ${opts.iteration}/${opts.maxIterations}`,
+    `[martin] Iteration ${opts.iteration}/${opts.maxIterations}`,
     `chunk: ${opts.chunkId}`,
   ];
   if (opts.durationMs !== undefined) {
@@ -128,7 +128,7 @@ export class BudgetExceededError extends Error {
 type CommitMessageFn = (diffStat: string, objective: string) => Promise<string | null>;
 
 export class CliSkillExecutor {
-  private readonly ralph: RalphLoop;
+  private readonly martin: MartinLoop;
   private readonly git: GitBranchIsolator;
   private readonly observer: ObserverDeps;
   private readonly verifyCommand?: string | undefined;
@@ -136,14 +136,14 @@ export class CliSkillExecutor {
   private readonly logger?: ILogger | undefined;
 
   constructor(
-    ralph: RalphLoop,
+    martin: MartinLoop,
     git: GitBranchIsolator,
     observer: ObserverDeps,
     verifyCommand?: string,
     commitMessageFn?: CommitMessageFn,
     logger?: ILogger,
   ) {
-    this.ralph = ralph;
+    this.martin = martin;
     this.git = git;
     this.observer = observer;
     this.verifyCommand = verifyCommand;
@@ -219,10 +219,10 @@ export class CliSkillExecutor {
       );
     }
 
-    // Build ralph config with defaults from input when not explicitly provided
+    // Build martin config with defaults from input when not explicitly provided
     const isImpl = taskId?.startsWith('impl:') ?? true;
     const defaultPromiseTag = isImpl ? `IMPL_${chunkId}_DONE` : `HARDEN_${chunkId}_DONE`;
-    const ralphDefaults: RalphLoopConfig = {
+    const martinDefaults: MartinLoopConfig = {
       prompt: input.objective,
       promiseTag: defaultPromiseTag,
       maxIterations: 10,
@@ -234,41 +234,41 @@ export class CliSkillExecutor {
     };
 
     // Wire onIteration for observer integration
-    const wrappedConfig: RalphLoopConfig = {
-      ...ralphDefaults,
-      ...config.ralph,
+    const wrappedConfig: MartinLoopConfig = {
+      ...martinDefaults,
+      ...config.martin,
       onRateLimit: (provider: string) => {
-        this.logger?.warn('RalphLoop: provider rate limited', { chunkId, provider }, 'ralph');
-        return config.ralph?.onRateLimit?.(provider);
+        this.logger?.warn('MartinLoop: provider rate limited', { chunkId, provider }, 'martin');
+        return config.martin?.onRateLimit?.(provider);
       },
       onProviderAttempt: (provider: string, iteration: number) => {
-        this.logger?.info('RalphLoop: provider attempt', { chunkId, provider, iteration }, 'ralph');
+        this.logger?.info('MartinLoop: provider attempt', { chunkId, provider, iteration }, 'martin');
         // Show in-place progress line (overwritten by next update or final summary)
         writeProgress(
           formatIterationProgress({ chunkId, iteration, maxIterations: wrappedConfig.maxIterations }),
           { final: false },
         );
-        config.ralph?.onProviderAttempt?.(provider, iteration);
+        config.martin?.onProviderAttempt?.(provider, iteration);
       },
       onProviderSwitch: (fromProvider: string, toProvider: string, reason: 'rate-limit' | 'post-sleep-reset') => {
-        this.logger?.warn('RalphLoop: provider switch', { chunkId, fromProvider, toProvider, reason }, 'ralph');
-        config.ralph?.onProviderSwitch?.(fromProvider, toProvider, reason);
+        this.logger?.warn('MartinLoop: provider switch', { chunkId, fromProvider, toProvider, reason }, 'martin');
+        config.martin?.onProviderSwitch?.(fromProvider, toProvider, reason);
       },
       onSpawnError: (provider: string, error: string) => {
-        this.logger?.error('RalphLoop: provider spawn error', { chunkId, provider, error }, 'ralph');
-        config.ralph?.onSpawnError?.(provider, error);
+        this.logger?.error('MartinLoop: provider spawn error', { chunkId, provider, error }, 'martin');
+        config.martin?.onSpawnError?.(provider, error);
       },
       onProviderTimeout: (provider: string, timeoutMs: number) => {
-        this.logger?.warn('RalphLoop: provider iteration timeout', { chunkId, provider, timeoutMs }, 'ralph');
-        config.ralph?.onProviderTimeout?.(provider, timeoutMs);
+        this.logger?.warn('MartinLoop: provider iteration timeout', { chunkId, provider, timeoutMs }, 'martin');
+        config.martin?.onProviderTimeout?.(provider, timeoutMs);
       },
       onSleep: (durationMs: number, source: string) => {
-        this.logger?.warn('RalphLoop: sleeping for rate limit reset', {
+        this.logger?.warn('MartinLoop: sleeping for rate limit reset', {
           chunkId,
           durationMs,
           source,
-        }, 'ralph');
-        config.ralph?.onSleep?.(durationMs, source);
+        }, 'martin');
+        config.martin?.onSleep?.(durationMs, source);
       },
       onIteration: (iteration: number, result: IterationResult) => {
         // Print final summary line (not overwritten)
@@ -282,21 +282,21 @@ export class CliSkillExecutor {
           }),
           { final: true },
         );
-        this.logger?.info('RalphLoop: iteration complete', {
+        this.logger?.info('MartinLoop: iteration complete', {
           chunkId,
           iteration,
           exitCode: result.exitCode,
           rateLimited: result.rateLimited,
           promiseDetected: result.promiseDetected,
           sleepMs: result.sleepMs,
-        }, 'ralph');
+        }, 'martin');
         // Full raw output -> build.log only (via debug, always captured)
         // Embed as multi-line text (not JSON) so newlines are preserved in build.log
         if (result.stderr) {
-          this.logger?.debug(`RalphLoop: iter ${iteration} stderr [${chunkId}]:\n${result.stderr}`, undefined, 'ralph');
+          this.logger?.debug(`MartinLoop: iter ${iteration} stderr [${chunkId}]:\n${result.stderr}`, undefined, 'martin');
         }
         if (result.stdout) {
-          this.logger?.debug(`RalphLoop: iter ${iteration} stdout [${chunkId}] (${result.stdout.length} chars):\n${result.stdout.slice(0, 4000)}`, undefined, 'ralph');
+          this.logger?.debug(`MartinLoop: iter ${iteration} stdout [${chunkId}] (${result.stdout.length} chars):\n${result.stdout.slice(0, 4000)}`, undefined, 'martin');
         }
         // Surface errors on terminal when iteration fails (non-rate-limit)
         if (result.exitCode !== 0 && !result.rateLimited) {
@@ -304,12 +304,12 @@ export class CliSkillExecutor {
           const stdoutExcerpt = !stderrExcerpt && result.stdout
             ? result.stdout.trim().split('\n').slice(-5).join('\n')
             : '';
-          this.logger?.error(`RalphLoop: iter ${iteration} failed (exit ${result.exitCode})`, {
+          this.logger?.error(`MartinLoop: iter ${iteration} failed (exit ${result.exitCode})`, {
             chunkId,
             exitCode: result.exitCode,
             ...(stderrExcerpt && { stderr: stderrExcerpt }),
             ...(stdoutExcerpt && { stdout: stdoutExcerpt }),
-          }, 'ralph');
+          }, 'martin');
         }
         // Create iteration span
         const iterSpan = this.observer.startSpan(this.observer.trace, {
@@ -321,7 +321,7 @@ export class CliSkillExecutor {
         this.observer.recordTokenUsage(
           iterSpan,
           {
-            promptTokens: Math.ceil((config.ralph?.prompt?.length ?? 0) / 4),
+            promptTokens: Math.ceil((config.martin?.prompt?.length ?? 0) / 4),
             completionTokens: result.tokensEstimated,
           },
           this.observer.counter,
@@ -345,14 +345,14 @@ export class CliSkillExecutor {
         }
 
         // Forward to original callback if provided
-        config.ralph?.onIteration?.(iteration, result);
+        config.martin?.onIteration?.(iteration, result);
       },
     };
 
-    // Run RALPH loop
-    let ralphResult: RalphLoopResult;
+    // Run Martin loop
+    let martinResult: MartinLoopResult;
     try {
-      ralphResult = await this.ralph.run(wrappedConfig);
+      martinResult = await this.martin.run(wrappedConfig);
     } catch (err) {
       if (err instanceof BudgetExceededError) {
         const postTokens = this.observer.counter.grandTotal();
@@ -369,7 +369,7 @@ export class CliSkillExecutor {
       }
       this.observer.endSpan(chunkSpan, { status: 'error', errorMessage: String(err) });
       throw new Error(
-        `RalphLoop failed for chunk "${chunkId}": ${err instanceof Error ? err.message : String(err)}`,
+        `MartinLoop failed for chunk "${chunkId}": ${err instanceof Error ? err.message : String(err)}`,
       );
     }
 
@@ -402,7 +402,7 @@ export class CliSkillExecutor {
       });
       const postTokens = this.observer.counter.grandTotal();
       return {
-        output: ralphResult.output,
+        output: martinResult.output,
         tokensUsed: postTokens.totalTokens - preTokens.totalTokens,
       };
     }
@@ -410,17 +410,17 @@ export class CliSkillExecutor {
     const postTokens = this.observer.counter.grandTotal();
     const chunkTokensUsed = postTokens.totalTokens - preTokens.totalTokens;
     this.observer.setMetadata(chunkSpan, {
-      iterations: ralphResult.iterations,
-      completed: ralphResult.completed,
+      iterations: martinResult.iterations,
+      completed: martinResult.completed,
       merged: mergeResult.merged,
       commits: mergeResult.commits,
     });
 
-    if (!ralphResult.completed) {
-      const errorMsg = `RalphLoop did not complete for chunk "${chunkId}" after ${ralphResult.iterations} iterations (no promise tag detected)`;
+    if (!martinResult.completed) {
+      const errorMsg = `MartinLoop did not complete for chunk "${chunkId}" after ${martinResult.iterations} iterations (no promise tag detected)`;
       this.logger?.error('CliSkillExecutor: chunk failed — promise not detected', {
         chunkId,
-        iterations: ralphResult.iterations,
+        iterations: martinResult.iterations,
         tokensUsed: chunkTokensUsed,
       });
       this.observer.endSpan(chunkSpan, { status: 'error', errorMessage: errorMsg });
@@ -429,7 +429,7 @@ export class CliSkillExecutor {
 
     this.observer.endSpan(chunkSpan, { status: 'completed' });
     return {
-      output: ralphResult.output,
+      output: martinResult.output,
       tokensUsed: chunkTokensUsed,
     };
   }

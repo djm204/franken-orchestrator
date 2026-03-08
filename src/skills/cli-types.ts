@@ -1,5 +1,5 @@
 /**
- * CLI skill types for RALPH-loop orchestration.
+ * CLI skill types for Martin-loop orchestration.
  * Types and interfaces only — no implementation code.
  */
 
@@ -15,7 +15,7 @@ export interface IterationResult {
   readonly sleepMs: number;
 }
 
-export interface RalphLoopConfig {
+export interface MartinLoopConfig {
   readonly prompt: string;
   readonly promiseTag: string;
   readonly maxIterations: number;
@@ -37,7 +37,7 @@ export interface RalphLoopConfig {
   readonly _sleepFn?: ((ms: number) => Promise<void>) | undefined;
 }
 
-export interface RalphLoopResult {
+export interface MartinLoopResult {
   readonly completed: boolean;
   readonly iterations: number;
   readonly output: string;
@@ -52,7 +52,7 @@ export interface GitIsolationConfig {
 }
 
 export interface CliSkillConfig {
-  readonly ralph: RalphLoopConfig;
+  readonly martin: MartinLoopConfig;
   readonly git: GitIsolationConfig;
   readonly budgetLimitUsd?: number | undefined;
 }

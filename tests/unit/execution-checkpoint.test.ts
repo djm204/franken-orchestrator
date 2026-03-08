@@ -471,7 +471,7 @@ describe('CliSkillExecutor.recoverDirtyFiles', () => {
     };
   }
 
-  function makeMockRalph() {
+  function makeMockMartin() {
     return { run: vi.fn() };
   }
 
@@ -511,7 +511,7 @@ describe('CliSkillExecutor.recoverDirtyFiles', () => {
     git.getStatus.mockReturnValue('');
     mockVerifyPass();
     const { CliSkillExecutor } = await import('../../src/skills/cli-skill-executor.js');
-    const executor = new CliSkillExecutor(makeMockRalph() as any, git as any, makeMockObserver());
+    const executor = new CliSkillExecutor(makeMockMartin() as any, git as any, makeMockObserver());
 
     const checkpoint = makeCheckpoint({ lastCommit: vi.fn(() => 'abc123') });
     const result = await executor.recoverDirtyFiles('t1', 'impl', checkpoint, makeLogger());
@@ -526,7 +526,7 @@ describe('CliSkillExecutor.recoverDirtyFiles', () => {
     git.getStatus.mockReturnValue('M src/file.ts');
     mockVerifyPass();
     const { CliSkillExecutor } = await import('../../src/skills/cli-skill-executor.js');
-    const executor = new CliSkillExecutor(makeMockRalph() as any, git as any, makeMockObserver(), 'echo ok');
+    const executor = new CliSkillExecutor(makeMockMartin() as any, git as any, makeMockObserver(), 'echo ok');
 
     const checkpoint = makeCheckpoint({ lastCommit: vi.fn(() => 'abc123') });
     const result = await executor.recoverDirtyFiles('t1', 'impl', checkpoint, makeLogger());
@@ -541,7 +541,7 @@ describe('CliSkillExecutor.recoverDirtyFiles', () => {
     git.getStatus.mockReturnValue('M src/file.ts');
     mockVerifyPass();
     const { CliSkillExecutor } = await import('../../src/skills/cli-skill-executor.js');
-    const executor = new CliSkillExecutor(makeMockRalph() as any, git as any, makeMockObserver(), 'echo ok');
+    const executor = new CliSkillExecutor(makeMockMartin() as any, git as any, makeMockObserver(), 'echo ok');
 
     const checkpoint = makeCheckpoint({ lastCommit: vi.fn(() => 'abc123') });
     const result = await executor.recoverDirtyFiles('impl:11_rate_limit_resilience', 'impl', checkpoint, makeLogger());
@@ -556,7 +556,7 @@ describe('CliSkillExecutor.recoverDirtyFiles', () => {
     git.getStatus.mockReturnValue('M src/broken.ts');
     mockVerifyFail();
     const { CliSkillExecutor } = await import('../../src/skills/cli-skill-executor.js');
-    const executor = new CliSkillExecutor(makeMockRalph() as any, git as any, makeMockObserver(), 'exit 1');
+    const executor = new CliSkillExecutor(makeMockMartin() as any, git as any, makeMockObserver(), 'exit 1');
 
     const checkpoint = makeCheckpoint({ lastCommit: vi.fn(() => 'last_good_hash') });
     const logger = makeLogger();
@@ -577,7 +577,7 @@ describe('CliSkillExecutor.recoverDirtyFiles', () => {
     mockVerifyPass();
     const { CliSkillExecutor } = await import('../../src/skills/cli-skill-executor.js');
     // No verifyCommand passed to constructor
-    const executor = new CliSkillExecutor(makeMockRalph() as any, git as any, makeMockObserver());
+    const executor = new CliSkillExecutor(makeMockMartin() as any, git as any, makeMockObserver());
 
     const checkpoint = makeCheckpoint({ lastCommit: vi.fn(() => 'abc123') });
     const result = await executor.recoverDirtyFiles('t1', 'impl', checkpoint, makeLogger());

@@ -1,7 +1,7 @@
 /**
  * Codex CLI provider implementation.
  *
- * Extracted from ralph-loop.ts: buildCodexArgs, normalizeCodexOutput,
+ * Extracted from martin-loop.ts: buildCodexArgs, normalizeCodexOutput,
  * tryExtractTextFromNode.
  */
 

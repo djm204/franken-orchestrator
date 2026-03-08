@@ -20,6 +20,8 @@ export interface SessionConfig {
   baseBranch: string;
   budget: number;
   provider: string;
+  providers?: string[] | undefined;
+  providersConfig?: Record<string, { command?: string; model?: string; extraArgs?: string[] }> | undefined;
   noPr: boolean;
   verbose: boolean;
   reset: boolean;
@@ -258,6 +260,8 @@ export class Session {
       baseBranch: this.config.baseBranch,
       budget: this.config.budget,
       provider: this.config.provider,
+      providers: this.config.providers,
+      providersConfig: this.config.providersConfig,
       noPr: this.config.noPr,
       verbose: this.config.verbose,
       reset: this.config.reset,

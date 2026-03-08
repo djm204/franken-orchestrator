@@ -76,7 +76,7 @@ export const BANNER = `\n${A.green}${A.bold}` +
 // ── Service badge ──
 
 const BADGE_COLORS: Record<string, string> = {
-  ralph: A.cyan,
+  martin: A.cyan,
   git: A.yellow,
   observer: A.magenta,
   planner: A.blue,

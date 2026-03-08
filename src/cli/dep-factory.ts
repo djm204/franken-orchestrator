@@ -1,12 +1,11 @@
 import { existsSync, unlinkSync, readdirSync, mkdirSync } from 'node:fs';
 import { basename, resolve } from 'node:path';
 import { BeastLogger } from '../logging/beast-logger.js';
-import { RalphLoop } from '../skills/ralph-loop.js';
+import { MartinLoop } from '../skills/martin-loop.js';
 import { GitBranchIsolator } from '../skills/git-branch-isolator.js';
 import { CliSkillExecutor } from '../skills/cli-skill-executor.js';
 import { CliLlmAdapter } from '../adapters/cli-llm-adapter.js';
-import { ClaudeProvider } from '../skills/providers/claude-provider.js';
-import { CodexProvider } from '../skills/providers/codex-provider.js';
+import { createDefaultRegistry } from '../skills/providers/cli-provider.js';
 import { CliObserverBridge } from '../adapters/cli-observer-bridge.js';
 import { FileCheckpointStore } from '../checkpoint/file-checkpoint-store.js';
 import { PrCreator } from '../closure/pr-creator.js';
@@ -25,6 +24,8 @@ export interface CliDepOptions {
   baseBranch: string;
   budget: number;
   provider: string;
+  providers?: string[] | undefined;
+  providersConfig?: Record<string, { command?: string; model?: string; extraArgs?: string[] }> | undefined;
   noPr: boolean;
   verbose: boolean;
   reset: boolean;
@@ -117,16 +118,19 @@ export async function createCliDeps(options: CliDepOptions): Promise<CliDeps> {
 
   // CLI execution stack
   const checkpoint = new FileCheckpointStore(checkpointFile);
-  const ralph = new RalphLoop();
+  const registry = createDefaultRegistry();
+  const martin = new MartinLoop(registry);
   const gitIso = new GitBranchIsolator({
     baseBranch,
     branchPrefix: 'feat/',
     autoCommit: true,
     workingDir: paths.root,
   });
-  const cliProvider = options.provider === 'codex' ? new CodexProvider() : new ClaudeProvider();
-  const cliLlmAdapter = new CliLlmAdapter(cliProvider, {
+  const resolvedProvider = registry.get(options.provider);
+  const override = options.providersConfig?.[options.provider];
+  const cliLlmAdapter = new CliLlmAdapter(resolvedProvider, {
     workingDir: paths.root,
+    ...(override?.command ? { commandOverride: override.command } : {}),
   });
 
   const adapterLlm = new AdapterLlmClient(cliLlmAdapter);
@@ -148,7 +152,7 @@ export async function createCliDeps(options: CliDepOptions): Promise<CliDeps> {
   const verifyCommand = 'npx tsc --noEmit';
 
   const cliExecutor = new CliSkillExecutor(
-    ralph, gitIso, observerBridge.observerDeps,
+    martin, gitIso, observerBridge.observerDeps,
     verifyCommand, commitMessageFn, logger,
   );
 

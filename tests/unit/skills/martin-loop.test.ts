@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { EventEmitter } from 'node:events';
 import type { ChildProcess } from 'node:child_process';
-import type { RalphLoopConfig, IterationResult } from '../../../src/skills/cli-types.js';
+import type { MartinLoopConfig, IterationResult } from '../../../src/skills/cli-types.js';
 import { ProviderRegistry } from '../../../src/skills/providers/index.js';
 import type { ICliProvider } from '../../../src/skills/providers/index.js';
 
@@ -46,7 +46,7 @@ function queueMock(opts: MockChildOpts): void {
   mockSpawn.mockImplementationOnce(() => mockChild(opts));
 }
 
-function baseConfig(overrides?: Partial<RalphLoopConfig>): RalphLoopConfig {
+function baseConfig(overrides?: Partial<MartinLoopConfig>): MartinLoopConfig {
   return {
     prompt: 'Implement feature X',
     promiseTag: 'IMPL_X_DONE',
@@ -59,15 +59,15 @@ function baseConfig(overrides?: Partial<RalphLoopConfig>): RalphLoopConfig {
   };
 }
 
-describe('RalphLoop', () => {
-  let RalphLoop: typeof import('../../../src/skills/ralph-loop.js').RalphLoop;
+describe('MartinLoop', () => {
+  let MartinLoop: typeof import('../../../src/skills/martin-loop.js').MartinLoop;
   let stdoutWriteSpy: ReturnType<typeof vi.spyOn>;
 
   beforeEach(async () => {
     vi.resetAllMocks();
     stdoutWriteSpy = vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
-    const mod = await import('../../../src/skills/ralph-loop.js');
-    RalphLoop = mod.RalphLoop;
+    const mod = await import('../../../src/skills/martin-loop.js');
+    MartinLoop = mod.MartinLoop;
   });
 
   afterEach(() => {
@@ -80,7 +80,7 @@ describe('RalphLoop', () => {
   it('detects promise tag in stdout and returns completed: true', async () => {
     queueMock({ stdout: 'Working on feature...\n<promise>IMPL_X_DONE</promise>\n', exitCode: 0 });
 
-    const loop = new RalphLoop();
+    const loop = new MartinLoop();
     const result = await loop.run(baseConfig());
 
     expect(result.completed).toBe(true);
@@ -96,7 +96,7 @@ describe('RalphLoop', () => {
       queueMock({ stdout: `Iteration ${i} output without promise tag`, exitCode: 0 });
     }
 
-    const loop = new RalphLoop();
+    const loop = new MartinLoop();
     const result = await loop.run(baseConfig({ maxIterations: 3 }));
 
     expect(result.completed).toBe(false);
@@ -125,7 +125,7 @@ describe('RalphLoop', () => {
     // Second iteration returns promise so the loop finishes
     queueMock({ stdout: 'done\n<promise>IMPL_X_DONE</promise>', exitCode: 0 });
 
-    const loop = new RalphLoop();
+    const loop = new MartinLoop();
     const runPromise = loop.run(baseConfig({ maxIterations: 2, timeoutMs: 5_000, onProviderTimeout }));
 
     // Advance past timeout
@@ -149,7 +149,7 @@ describe('RalphLoop', () => {
     // Next iteration succeeds so loop can complete.
     queueMock({ stdout: 'done\n<promise>IMPL_X_DONE</promise>', exitCode: 0 });
 
-    const loop = new RalphLoop();
+    const loop = new MartinLoop();
     const runPromise = loop.run(baseConfig({ maxIterations: 2, timeoutMs: 1_000 }));
 
     // timeoutMs + 5s (SIGKILL) + 7s fallback buffer
@@ -167,7 +167,7 @@ describe('RalphLoop', () => {
   it('spawns correct CLI args for claude provider', async () => {
     queueMock({ stdout: 'ok\n<promise>IMPL_X_DONE</promise>', exitCode: 0 });
 
-    const loop = new RalphLoop();
+    const loop = new MartinLoop();
     await loop.run(baseConfig({ provider: 'claude', command: '/usr/bin/claude' }));
 
     expect(mockSpawn).toHaveBeenCalledWith(
@@ -194,7 +194,7 @@ describe('RalphLoop', () => {
   it('spawns correct CLI args for codex provider', async () => {
     queueMock({ stdout: 'ok\n<promise>IMPL_X_DONE</promise>', exitCode: 0 });
 
-    const loop = new RalphLoop();
+    const loop = new MartinLoop();
     await loop.run(baseConfig({ provider: 'codex', command: '/usr/bin/codex' }));
 
     expect(mockSpawn).toHaveBeenCalledWith(
@@ -217,7 +217,7 @@ describe('RalphLoop', () => {
     });
 
     const onIteration = vi.fn();
-    const loop = new RalphLoop();
+    const loop = new MartinLoop();
     const result = await loop.run(baseConfig({ provider: 'codex', onIteration }));
 
     expect(result.completed).toBe(true);
@@ -238,7 +238,7 @@ describe('RalphLoop', () => {
 
     const onIteration = vi.fn();
     const onRateLimit = vi.fn();
-    const loop = new RalphLoop();
+    const loop = new MartinLoop();
     const result = await loop.run(baseConfig({ provider: 'codex', onIteration, onRateLimit }));
 
     expect(result.completed).toBe(true);
@@ -250,7 +250,7 @@ describe('RalphLoop', () => {
   it('preserves codex output when stdout is not JSON', async () => {
     queueMock({ stdout: 'plain codex text\n<promise>IMPL_X_DONE</promise>', exitCode: 0 });
 
-    const loop = new RalphLoop();
+    const loop = new MartinLoop();
     const result = await loop.run(baseConfig({ provider: 'codex' }));
 
     expect(result.completed).toBe(true);
@@ -263,7 +263,7 @@ describe('RalphLoop', () => {
     queueMock({ stdout: 'Error output', exitCode: 1 });
     queueMock({ stdout: 'Success!\n<promise>IMPL_X_DONE</promise>', exitCode: 0 });
 
-    const loop = new RalphLoop();
+    const loop = new MartinLoop();
     const result = await loop.run(baseConfig({ maxIterations: 5 }));
 
     expect(result.completed).toBe(true);
@@ -276,7 +276,7 @@ describe('RalphLoop', () => {
   it('rejects promise when stdout has no meaningful content beyond the tag', async () => {
     queueMock({ stdout: '  <promise>IMPL_X_DONE</promise>  \n', exitCode: 0 });
 
-    const loop = new RalphLoop();
+    const loop = new MartinLoop();
     const result = await loop.run(baseConfig({ maxIterations: 1 }));
 
     expect(result.completed).toBe(false);
@@ -289,7 +289,7 @@ describe('RalphLoop', () => {
     queueMock({ stderr: '429 Too Many Requests', exitCode: 1 });
     queueMock({ stdout: 'Done!\n<promise>IMPL_X_DONE</promise>', exitCode: 0 });
 
-    const loop = new RalphLoop();
+    const loop = new MartinLoop();
     const result = await loop.run(baseConfig({ maxIterations: 1 }));
 
     // maxIterations is 1, but the rate-limited iteration shouldn't count
@@ -306,7 +306,7 @@ describe('RalphLoop', () => {
     queueMock({ stderr: 'rate limit exceeded', exitCode: 1 });
     queueMock({ stdout: 'Codex did it!\n<promise>IMPL_X_DONE</promise>', exitCode: 0 });
 
-    const loop = new RalphLoop();
+    const loop = new MartinLoop();
     const result = await loop.run(baseConfig({ maxIterations: 2, onRateLimit }));
 
     expect(onRateLimit).toHaveBeenCalledWith('claude');
@@ -324,7 +324,7 @@ describe('RalphLoop', () => {
 
     queueMock({ stdout: 'ok\n<promise>IMPL_X_DONE</promise>', exitCode: 0 });
 
-    const loop = new RalphLoop();
+    const loop = new MartinLoop();
     await loop.run(baseConfig({ provider: 'claude' }));
 
     const spawnEnv = (mockSpawn.mock.calls[0] as unknown[])[2] as { env: Record<string, string> };
@@ -339,7 +339,7 @@ describe('RalphLoop', () => {
     const output = 'x'.repeat(160) + '\n<promise>IMPL_X_DONE</promise>';
 
     queueMock({ stdout: output, exitCode: 0 });
-    const loop = new RalphLoop();
+    const loop = new MartinLoop();
     const claudeResult = await loop.run(baseConfig({ provider: 'claude' }));
     expect(claudeResult.tokensUsed).toBe(Math.ceil(output.length / 4));
 
@@ -356,7 +356,7 @@ describe('RalphLoop', () => {
     queueMock({ stdout: 'first output', exitCode: 0 });
     queueMock({ stdout: 'second\n<promise>IMPL_X_DONE</promise>', exitCode: 0 });
 
-    const loop = new RalphLoop();
+    const loop = new MartinLoop();
     await loop.run(baseConfig({ maxIterations: 5, onIteration }));
 
     expect(onIteration).toHaveBeenCalledTimes(2);
@@ -387,7 +387,7 @@ describe('RalphLoop', () => {
       queueMock({ stderr: pattern, exitCode: 1 });
       queueMock({ stdout: 'ok\n<promise>IMPL_X_DONE</promise>', exitCode: 0 });
 
-      const loop = new RalphLoop();
+      const loop = new MartinLoop();
       const result = await loop.run(baseConfig({ maxIterations: 1 }));
       expect(result.completed).toBe(true);
     }
@@ -413,7 +413,7 @@ describe('RalphLoop', () => {
 
     queueMock({ stdout: 'custom output\n<promise>IMPL_X_DONE</promise>', exitCode: 0 });
 
-    const loop = new RalphLoop(registry);
+    const loop = new MartinLoop(registry);
     const result = await loop.run(baseConfig({ provider: 'custom' }));
 
     expect(result.completed).toBe(true);

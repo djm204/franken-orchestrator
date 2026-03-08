@@ -192,7 +192,7 @@ describe('PrCreator', () => {
         'TITLE: feat(orchestrator): add CLI execution pipeline',
         'BODY:',
         '## Summary',
-        '- Added CLI skill executor with RALPH loop integration',
+        '- Added CLI skill executor with Martin loop integration',
         '- Implemented git branch isolation per chunk',
         '',
         '## Changes',
@@ -370,7 +370,7 @@ describe('PrCreator', () => {
 
   it('uses LLM-generated title and body when ILlmClient is provided', async () => {
     const llmResponse = [
-      'TITLE: feat(cli): implement RALPH loop execution pipeline',
+      'TITLE: feat(cli): implement Martin loop execution pipeline',
       'BODY:',
       '## Summary',
       '- Integrated CLI skill executor',
@@ -396,7 +396,7 @@ describe('PrCreator', () => {
 
     expect(result?.url).toBe('https://example.com/pr/5');
     const createCmd = calls.find(c => c.startsWith('gh pr create')) ?? '';
-    expect(createCmd).toContain('feat(cli): implement RALPH loop execution pipeline');
+    expect(createCmd).toContain('feat(cli): implement Martin loop execution pipeline');
   });
 
   it('falls back to static title/body when LLM generation fails', async () => {

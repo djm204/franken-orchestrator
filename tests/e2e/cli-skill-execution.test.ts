@@ -5,7 +5,7 @@ import type { BeastInput } from '../../src/types.js';
 import { NullLogger } from '../../src/logger.js';
 import { CliSkillExecutor } from '../../src/skills/cli-skill-executor.js';
 import type { ObserverDeps } from '../../src/skills/cli-skill-executor.js';
-import type { RalphLoop } from '../../src/skills/ralph-loop.js';
+import type { MartinLoop } from '../../src/skills/martin-loop.js';
 import type { GitBranchIsolator } from '../../src/skills/git-branch-isolator.js';
 import {
   InMemoryFirewall,
@@ -47,15 +47,15 @@ describe.skipIf(!process.env['E2E'])('E2E: CLI Skill Execution', () => {
   }
 
   it('single chunk flows through BeastLoop via CliSkillExecutor', async () => {
-    // Mock RalphLoop — returns success with promise tag on first iteration
-    const mockRalph = {
+    // Mock MartinLoop — returns success with promise tag on first iteration
+    const mockMartin = {
       run: vi.fn().mockResolvedValue({
         completed: true,
         iterations: 1,
         output: PROMISE_OUTPUT,
         tokensUsed: 100,
       }),
-    } as unknown as RalphLoop;
+    } as unknown as MartinLoop;
 
     // Mock GitBranchIsolator — simulates branch creation and merge
     const mockGit = {
@@ -64,7 +64,7 @@ describe.skipIf(!process.env['E2E'])('E2E: CLI Skill Execution', () => {
     } as unknown as GitBranchIsolator;
 
     const observerDeps = createMockObserverDeps();
-    const cliExecutor = new CliSkillExecutor(mockRalph, mockGit, observerDeps);
+    const cliExecutor = new CliSkillExecutor(mockMartin, mockGit, observerDeps);
 
     // Skills registry includes the CLI skill
     const skills = new InMemorySkills([
@@ -115,8 +115,8 @@ describe.skipIf(!process.env['E2E'])('E2E: CLI Skill Execution', () => {
     // Token spend is recorded (non-zero)
     expect(result.tokenSpend.totalTokens).toBeGreaterThan(0);
 
-    // RalphLoop was invoked
-    expect(mockRalph.run).toHaveBeenCalledOnce();
+    // MartinLoop was invoked
+    expect(mockMartin.run).toHaveBeenCalledOnce();
 
     // Git isolation: branch created and merged
     expect(mockGit.isolate).toHaveBeenCalledWith('test-chunk');

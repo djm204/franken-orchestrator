@@ -56,7 +56,7 @@ describeE2E('CLI E2E', () => {
       planDirOverride: fixtureChunks,
     });
 
-    // This will fail at RALPH loop execution (no real CLI provider)
+    // This will fail at Martin loop execution (no real CLI provider)
     // but it proves the wiring works up to that point
     try {
       await session.start();

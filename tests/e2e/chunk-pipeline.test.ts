@@ -8,7 +8,7 @@ import type { BeastInput } from '../../src/types.js';
 import { NullLogger } from '../../src/logger.js';
 import { CliSkillExecutor } from '../../src/skills/cli-skill-executor.js';
 import type { ObserverDeps } from '../../src/skills/cli-skill-executor.js';
-import type { RalphLoop } from '../../src/skills/ralph-loop.js';
+import type { MartinLoop } from '../../src/skills/martin-loop.js';
 import type { GitBranchIsolator } from '../../src/skills/git-branch-isolator.js';
 import { ChunkFileGraphBuilder } from '../../src/planning/chunk-file-graph-builder.js';
 import { FileCheckpointStore } from '../../src/checkpoint/file-checkpoint-store.js';
@@ -90,8 +90,8 @@ describe.skipIf(!process.env['E2E'])('E2E: Chunk Pipeline', () => {
     // 2. Create ChunkFileGraphBuilder(tmpDir) — real implementation
     const graphBuilder = new ChunkFileGraphBuilder(tmpDir);
 
-    // 3. Mock RalphLoop — invokes onIteration then returns promise-tagged output
-    const mockRalph = {
+    // 3. Mock MartinLoop — invokes onIteration then returns promise-tagged output
+    const mockMartin = {
       run: vi.fn().mockImplementation(async (config: { onIteration?: (i: number, r: unknown) => void }) => {
         // Simulate one iteration with onIteration callback (generates per-commit checkpoint entries)
         config.onIteration?.(1, {
@@ -111,7 +111,7 @@ describe.skipIf(!process.env['E2E'])('E2E: Chunk Pipeline', () => {
           tokensUsed: 100,
         };
       }),
-    } as unknown as RalphLoop;
+    } as unknown as MartinLoop;
 
     // 4. Mock GitBranchIsolator — simulates branch create, autoCommit, merge
     const mockGit = {
@@ -134,7 +134,7 @@ describe.skipIf(!process.env['E2E'])('E2E: Chunk Pipeline', () => {
 
     // 7. Create CliSkillExecutor with mocked deps
     const observerDeps = createMockObserverDeps();
-    const cliExecutor = new CliSkillExecutor(mockRalph, mockGit, observerDeps);
+    const cliExecutor = new CliSkillExecutor(mockMartin, mockGit, observerDeps);
 
     // Skills registry — must include CLI skill matching the chunk
     const skills = new InMemorySkills([
@@ -209,8 +209,8 @@ describe.skipIf(!process.env['E2E'])('E2E: Chunk Pipeline', () => {
     const prCallResult = (mockPrCreator.create as ReturnType<typeof vi.fn>).mock.calls[0]![0];
     expect(prCallResult.status).toBe('completed');
 
-    // RalphLoop was invoked twice (impl + harden)
-    expect(mockRalph.run).toHaveBeenCalledTimes(2);
+    // MartinLoop was invoked twice (impl + harden)
+    expect(mockMartin.run).toHaveBeenCalledTimes(2);
 
     // Git isolation: branch created and merged twice
     expect(mockGit.isolate).toHaveBeenCalledTimes(2);

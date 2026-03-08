@@ -16,7 +16,7 @@
  *        --design-doc <orchestrator>/test/e2e/test-design-doc.md \
  *        --no-pr --budget 2 --base-branch main
  *   4. When prompted for review, type "y" and press Enter
- *   5. Verify output contains [planner] and [ralph] labels
+ *   5. Verify output contains [planner] and [martin] labels
  *   6. Verify budget bar shows non-zero spend (e.g., $0.05/$2)
  *   7. Verify no raw JSON frames like {"type":"content_block_delta"}
  *   8. rm -rf /tmp/fb-smoke
@@ -91,8 +91,8 @@ describe.skipIf(!process.env['E2E'])('E2E Pipeline', () => {
     // Verify [planner] service label (plan phase ran)
     expect(result.stdout).toContain('[planner]');
 
-    // Verify [ralph] service label (execution phase ran)
-    expect(result.stdout).toContain('[ralph]');
+    // Verify [martin] service label (execution phase ran)
+    expect(result.stdout).toContain('[martin]');
 
     // Verify budget bar with non-zero spend (e.g., $0.05/$2)
     const budgetMatch = result.stdout.match(/\$(\d+\.\d{2})\/\$(\d+)/);

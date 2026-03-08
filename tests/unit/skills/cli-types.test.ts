@@ -1,8 +1,8 @@
 import { describe, it, expect, expectTypeOf } from 'vitest';
 import type { SkillDescriptor } from '../../../src/deps.js';
 import type {
-  RalphLoopConfig,
-  RalphLoopResult,
+  MartinLoopConfig,
+  MartinLoopResult,
   GitIsolationConfig,
   CliSkillConfig,
 } from '../../../src/skills/cli-types.js';
@@ -24,9 +24,9 @@ describe('SkillDescriptor.executionType', () => {
   });
 });
 
-describe('RalphLoopConfig', () => {
+describe('MartinLoopConfig', () => {
   it('has all required readonly properties (without claudeCmd/codexCmd)', () => {
-    const config: RalphLoopConfig = {
+    const config: MartinLoopConfig = {
       prompt: 'Implement feature X',
       promiseTag: 'IMPL_X_DONE',
       maxIterations: 5,
@@ -44,8 +44,8 @@ describe('RalphLoopConfig', () => {
   });
 
   it('accepts any string as provider (not union)', () => {
-    expectTypeOf<RalphLoopConfig['provider']>().toEqualTypeOf<string>();
-    const config: RalphLoopConfig = {
+    expectTypeOf<MartinLoopConfig['provider']>().toEqualTypeOf<string>();
+    const config: MartinLoopConfig = {
       prompt: 'test',
       promiseTag: 'TEST',
       maxIterations: 1,
@@ -57,7 +57,7 @@ describe('RalphLoopConfig', () => {
   });
 
   it('has optional command field replacing claudeCmd/codexCmd', () => {
-    const withCommand: RalphLoopConfig = {
+    const withCommand: MartinLoopConfig = {
       prompt: 'test',
       promiseTag: 'TEST',
       maxIterations: 1,
@@ -68,7 +68,7 @@ describe('RalphLoopConfig', () => {
     };
     expect(withCommand.command).toBe('/usr/local/bin/aider');
 
-    const withoutCommand: RalphLoopConfig = {
+    const withoutCommand: MartinLoopConfig = {
       prompt: 'test',
       promiseTag: 'TEST',
       maxIterations: 1,
@@ -80,7 +80,7 @@ describe('RalphLoopConfig', () => {
   });
 
   it('accepts providers as readonly string array', () => {
-    const config: RalphLoopConfig = {
+    const config: MartinLoopConfig = {
       prompt: 'test',
       promiseTag: 'TEST',
       maxIterations: 1,
@@ -93,14 +93,14 @@ describe('RalphLoopConfig', () => {
   });
 
   it('has readonly properties', () => {
-    expectTypeOf<RalphLoopConfig>().toHaveProperty('prompt');
-    expectTypeOf<Readonly<RalphLoopConfig>>().toEqualTypeOf<RalphLoopConfig>();
+    expectTypeOf<MartinLoopConfig>().toHaveProperty('prompt');
+    expectTypeOf<Readonly<MartinLoopConfig>>().toEqualTypeOf<MartinLoopConfig>();
   });
 });
 
-describe('RalphLoopResult', () => {
+describe('MartinLoopResult', () => {
   it('has all required readonly properties', () => {
-    const result: RalphLoopResult = {
+    const result: MartinLoopResult = {
       completed: true,
       iterations: 3,
       output: 'Feature implemented successfully',
@@ -114,7 +114,7 @@ describe('RalphLoopResult', () => {
   });
 
   it('has readonly properties', () => {
-    expectTypeOf<Readonly<RalphLoopResult>>().toEqualTypeOf<RalphLoopResult>();
+    expectTypeOf<Readonly<MartinLoopResult>>().toEqualTypeOf<MartinLoopResult>();
   });
 });
 
@@ -139,9 +139,9 @@ describe('GitIsolationConfig', () => {
 });
 
 describe('CliSkillConfig', () => {
-  it('has required ralph and git properties', () => {
+  it('has required martin and git properties', () => {
     const config: CliSkillConfig = {
-      ralph: {
+      martin: {
         prompt: 'Do the thing',
         promiseTag: 'THING_DONE',
         maxIterations: 3,
@@ -157,14 +157,14 @@ describe('CliSkillConfig', () => {
       },
     };
 
-    expect(config.ralph.prompt).toBe('Do the thing');
+    expect(config.martin.prompt).toBe('Do the thing');
     expect(config.git.baseBranch).toBe('main');
     expect(config.budgetLimitUsd).toBeUndefined();
   });
 
   it('accepts optional budgetLimitUsd', () => {
     const config: CliSkillConfig = {
-      ralph: {
+      martin: {
         prompt: 'Do the thing',
         promiseTag: 'THING_DONE',
         maxIterations: 3,

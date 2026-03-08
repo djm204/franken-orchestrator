@@ -31,9 +31,9 @@ src/
     llm-graph-builder.ts            # Mode 2: LLM decomposes design doc → PlanGraph
     interview-loop.ts               # Mode 3: user interview → design doc → PlanGraph
   skills/
-    cli-types.ts                    # RalphLoopConfig, CliSkillConfig, GitIsolationConfig
+    cli-types.ts                    # MartinLoopConfig, CliSkillConfig, GitIsolationConfig
     cli-skill-executor.ts           # CliSkillExecutor: git isolate → ralph → merge
-    ralph-loop.ts                   # RalphLoop: spawn claude/codex, promise detection, rate-limit fallback
+    martin-loop.ts                   # MartinLoop: spawn claude/codex, promise detection, rate-limit fallback
     git-branch-isolator.ts          # GitBranchIsolator: branch per chunk, auto-commit, merge
     llm-skill-handler.ts            # LlmSkillHandler
     llm-planner.ts                  # LlmPlanner
@@ -90,8 +90,8 @@ src/
 
 ## CLI Skill Execution
 
-- **CliSkillExecutor(ralph, git, observer)** -- orchestrates git isolation, RALPH loop, merge, observer spans, budget checks, dirty-file recovery
-- **RalphLoop** -- spawns `claude`/`codex` CLI per iteration; detects `<promise>TAG</promise>` in output; multi-provider fallback on rate limit; parses reset times; abort-signal aware
+- **CliSkillExecutor(ralph, git, observer)** -- orchestrates git isolation, Martin loop, merge, observer spans, budget checks, dirty-file recovery
+- **MartinLoop** -- spawns `claude`/`codex` CLI per iteration; detects `<promise>TAG</promise>` in output; multi-provider fallback on rate limit; parses reset times; abort-signal aware
 - **GitBranchIsolator(config)** -- `isolate(chunkId)`, `autoCommit()`, `merge()`, `resetHard()`
 
 ## Crash Recovery
@@ -130,4 +130,4 @@ npm run typecheck      # tsc --noEmit
 - `TokenBudgetBreaker.check()` (from franken-observer) is sync and always returns `{tripped: false}` -- use `checkAsync()` instead
 - `executeTask()` is stub-level for non-CLI skills -- it calls `skills.execute()` but real LLM orchestration relies on `CliSkillExecutor`
 - CLI `--resume` currently only displays snapshot info; full re-execution from saved phase is not wired
-- `RalphLoop` rate-limit detection only checks stderr (not stdout) to avoid false positives when the model's output discusses rate limiting
+- `MartinLoop` rate-limit detection only checks stderr (not stdout) to avoid false positives when the model's output discusses rate limiting

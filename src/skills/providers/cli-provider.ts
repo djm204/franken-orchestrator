@@ -2,7 +2,7 @@
  * Pluggable CLI provider interface and registry.
  *
  * ICliProvider abstracts CLI agent differences (claude, codex, etc.)
- * so the RALPH-loop can work with any provider without hardcoding.
+ * so the Martin-loop can work with any provider without hardcoding.
  *
  * ProviderRegistry holds named providers and validates on lookup.
  */

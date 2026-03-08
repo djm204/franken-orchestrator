@@ -74,6 +74,7 @@ vi.mock('../../../src/cli/config-loader.js', () => ({
     enableHeartbeat: false,
     minCritiqueScore: 0.7,
     maxTotalTokens: 100_000,
+    providers: { fallbackChain: [], overrides: {} },
   })),
 }));
 

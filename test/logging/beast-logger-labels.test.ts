@@ -14,14 +14,14 @@ describe('BeastLogger service labels', () => {
 
   // ── Badge rendering ──
 
-  it('info with source "ralph" includes [ralph] badge with cyan ANSI codes', () => {
+  it('info with source "martin" includes [martin] badge with cyan ANSI codes', () => {
     const logger = new BeastLogger({ verbose: false });
-    logger.info('hello', 'ralph');
+    logger.info('hello', 'martin');
 
     expect(logSpy).toHaveBeenCalledOnce();
     const output = logSpy.mock.calls[0]![0] as string;
     expect(output).toContain('\x1b[36m');           // cyan
-    expect(output).toContain('[ralph]');
+    expect(output).toContain('[martin]');
     expect(output).toContain('\x1b[0m');             // reset after badge
     expect(output).toContain('hello');
   });
@@ -80,7 +80,7 @@ describe('BeastLogger service labels', () => {
   // ── Badge color map ──
 
   const colorMap: Array<[string, string]> = [
-    ['ralph',    '\x1b[36m'],  // cyan
+    ['martin',    '\x1b[36m'],  // cyan
     ['git',      '\x1b[33m'],  // yellow
     ['observer', '\x1b[35m'],  // magenta
     ['planner',  '\x1b[34m'],  // blue

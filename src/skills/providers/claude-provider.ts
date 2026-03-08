@@ -1,7 +1,7 @@
 /**
  * Claude CLI provider implementation.
  *
- * Extracted from ralph-loop.ts: buildClaudeArgs, RATE_LIMIT_PATTERNS,
+ * Extracted from martin-loop.ts: buildClaudeArgs, RATE_LIMIT_PATTERNS,
  * parseResetTime, and env filtering logic.
  */
 
@@ -135,6 +135,9 @@ export class ClaudeProvider implements ICliProvider {
         delete filtered[key];
       }
     }
+    // Signal to plugins (martin-loop, etc.) that this is a spawned child process.
+    // Plugins should check this and skip activation to avoid poisoning the session.
+    filtered['FRANKENBEAST_SPAWNED'] = '1';
     return filtered;
   }
 

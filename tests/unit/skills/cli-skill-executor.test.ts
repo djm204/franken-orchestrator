@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import type { RalphLoopConfig, IterationResult, CliSkillConfig, GitIsolationConfig } from '../../../src/skills/cli-types.js';
+import type { MartinLoopConfig, IterationResult, CliSkillConfig, GitIsolationConfig } from '../../../src/skills/cli-types.js';
 import type { SkillInput, ICheckpointStore } from '../../../src/deps.js';
 import { makeLogger } from '../../helpers/stubs.js';
 
@@ -16,7 +16,7 @@ function makeSkillInput(overrides?: Partial<SkillInput>): SkillInput {
   };
 }
 
-function makeRalphConfig(overrides?: Partial<RalphLoopConfig>): RalphLoopConfig {
+function makeMartinConfig(overrides?: Partial<MartinLoopConfig>): MartinLoopConfig {
   return {
     prompt: 'Implement the feature',
     promiseTag: 'IMPL_01_DONE',
@@ -41,12 +41,12 @@ function makeGitConfig(overrides?: Partial<GitIsolationConfig>): GitIsolationCon
 }
 
 function makeCliConfig(overrides?: {
-  ralph?: Partial<RalphLoopConfig>;
+  martin?: Partial<MartinLoopConfig>;
   git?: Partial<GitIsolationConfig>;
   budgetLimitUsd?: number;
 }): CliSkillConfig {
   return {
-    ralph: makeRalphConfig(overrides?.ralph),
+    martin: makeMartinConfig(overrides?.martin),
     git: makeGitConfig(overrides?.git),
     budgetLimitUsd: overrides?.budgetLimitUsd,
   };
@@ -66,7 +66,7 @@ function makeIterResult(overrides?: Partial<IterationResult>): IterationResult {
   };
 }
 
-function makeMockRalph() {
+function makeMockMartin() {
   return {
     run: vi.fn().mockResolvedValue({
       completed: true,
@@ -132,12 +132,12 @@ function makeCheckpoint(overrides: Partial<ICheckpointStore> = {}): ICheckpointS
 // ── Tests ──
 
 describe('CliSkillExecutor', () => {
-  let ralph: ReturnType<typeof makeMockRalph>;
+  let martin: ReturnType<typeof makeMockMartin>;
   let git: ReturnType<typeof makeMockGit>;
   let observer: ReturnType<typeof makeMockObserver>;
 
   beforeEach(() => {
-    ralph = makeMockRalph();
+    martin = makeMockMartin();
     git = makeMockGit();
     observer = makeMockObserver();
   });
@@ -150,13 +150,13 @@ describe('CliSkillExecutor', () => {
     taskId?: string,
   ) {
     const { CliSkillExecutor } = await import('../../../src/skills/cli-skill-executor.js');
-    const executor = new CliSkillExecutor(ralph as any, git as any, observer);
+    const executor = new CliSkillExecutor(martin as any, git as any, observer);
     return executor.execute(skillId, input, config, checkpoint, taskId);
   }
 
   describe('successful execution (promise detected)', () => {
     it('returns SkillResult with output and tokensUsed', async () => {
-      ralph.run.mockImplementation(async (config: RalphLoopConfig) => {
+      martin.run.mockImplementation(async (config: MartinLoopConfig) => {
         config.onIteration?.(1, makeIterResult({ promiseDetected: true, tokensEstimated: 250 }));
         return { completed: true, iterations: 1, output: '<promise>IMPL_01_DONE</promise>', tokensUsed: 250 };
       });
@@ -172,8 +172,8 @@ describe('CliSkillExecutor', () => {
   });
 
   describe('failed execution (max iterations)', () => {
-    it('throws when ralph loop does not complete', async () => {
-      ralph.run.mockResolvedValue({
+    it('throws when martin loop does not complete', async () => {
+      martin.run.mockResolvedValue({
         completed: false,
         iterations: 5,
         output: 'partial output',
@@ -181,7 +181,7 @@ describe('CliSkillExecutor', () => {
       });
 
       await expect(createAndExecute()).rejects.toThrow(
-        /RalphLoop did not complete.*after 5 iterations.*no promise tag detected/,
+        /MartinLoop did not complete.*after 5 iterations.*no promise tag detected/,
       );
     });
   });
@@ -192,7 +192,7 @@ describe('CliSkillExecutor', () => {
         .mockReturnValueOnce({ tripped: false, limitUsd: 10, spendUsd: 0 })
         .mockReturnValue({ tripped: true, limitUsd: 10, spendUsd: 11 });
 
-      ralph.run.mockImplementation(async (config: RalphLoopConfig) => {
+      martin.run.mockImplementation(async (config: MartinLoopConfig) => {
         config.onIteration?.(1, makeIterResult({ tokensEstimated: 5000 }));
         // BudgetExceededError thrown in onIteration — this line should not be reached
         return { completed: true, iterations: 1, output: 'done', tokensUsed: 5000 };
@@ -211,7 +211,7 @@ describe('CliSkillExecutor', () => {
 
   describe('observer span creation per iteration', () => {
     it('creates a span for each iteration via onIteration callback', async () => {
-      ralph.run.mockImplementation(async (config: RalphLoopConfig) => {
+      martin.run.mockImplementation(async (config: MartinLoopConfig) => {
         config.onIteration?.(1, makeIterResult({ iteration: 1 }));
         config.onIteration?.(2, makeIterResult({ iteration: 2 }));
         config.onIteration?.(3, makeIterResult({ iteration: 3, promiseDetected: true }));
@@ -239,7 +239,7 @@ describe('CliSkillExecutor', () => {
 
   describe('token recording per iteration', () => {
     it('calls recordTokenUsage for each iteration', async () => {
-      ralph.run.mockImplementation(async (config: RalphLoopConfig) => {
+      martin.run.mockImplementation(async (config: MartinLoopConfig) => {
         config.onIteration?.(1, makeIterResult({ iteration: 1, tokensEstimated: 100 }));
         config.onIteration?.(2, makeIterResult({ iteration: 2, tokensEstimated: 200 }));
         return { completed: true, iterations: 2, output: 'done', tokensUsed: 300 };
@@ -262,12 +262,12 @@ describe('CliSkillExecutor', () => {
   });
 
   describe('git branch isolation lifecycle', () => {
-    it('calls git.isolate before ralph.run and git.merge after', async () => {
+    it('calls git.isolate before martin.run and git.merge after', async () => {
       const callOrder: string[] = [];
 
       git.isolate.mockImplementation(() => { callOrder.push('isolate'); });
-      ralph.run.mockImplementation(async () => {
-        callOrder.push('ralph.run');
+      martin.run.mockImplementation(async () => {
+        callOrder.push('martin.run');
         return { completed: true, iterations: 1, output: 'done', tokensUsed: 100 };
       });
       git.merge.mockImplementation(() => {
@@ -277,7 +277,7 @@ describe('CliSkillExecutor', () => {
 
       await createAndExecute();
 
-      expect(callOrder).toEqual(['isolate', 'ralph.run', 'merge']);
+      expect(callOrder).toEqual(['isolate', 'martin.run', 'merge']);
     });
 
     it('extracts chunkId from skillId for git operations', async () => {
@@ -288,11 +288,11 @@ describe('CliSkillExecutor', () => {
     });
   });
 
-  describe('error propagation from RalphLoop', () => {
-    it('wraps RalphLoop errors with chunk context', async () => {
-      ralph.run.mockRejectedValue(new Error('spawn ENOENT'));
+  describe('error propagation from MartinLoop', () => {
+    it('wraps MartinLoop errors with chunk context', async () => {
+      martin.run.mockRejectedValue(new Error('spawn ENOENT'));
 
-      await expect(createAndExecute()).rejects.toThrow(/RalphLoop.*01_types.*spawn ENOENT/);
+      await expect(createAndExecute()).rejects.toThrow(/MartinLoop.*01_types.*spawn ENOENT/);
     });
   });
 
@@ -333,13 +333,13 @@ describe('CliSkillExecutor', () => {
   });
 
   describe('budget exceeded before loop starts', () => {
-    it('returns immediately without calling ralph.run or git.isolate', async () => {
+    it('returns immediately without calling martin.run or git.isolate', async () => {
       observer.breaker.check.mockReturnValue({ tripped: true, limitUsd: 10, spendUsd: 12 });
 
       const result = await createAndExecute();
 
       expect(git.isolate).not.toHaveBeenCalled();
-      expect(ralph.run).not.toHaveBeenCalled();
+      expect(martin.run).not.toHaveBeenCalled();
       expect(result.output).toContain('Budget exceeded');
       expect(result.tokensUsed).toBe(0);
     });
@@ -350,7 +350,7 @@ describe('CliSkillExecutor', () => {
       const commitMessageFn = vi.fn().mockResolvedValue('feat(types): add shared type definitions');
 
       const { CliSkillExecutor } = await import('../../../src/skills/cli-skill-executor.js');
-      const executor = new CliSkillExecutor(ralph as any, git as any, observer, undefined, commitMessageFn);
+      const executor = new CliSkillExecutor(martin as any, git as any, observer, undefined, commitMessageFn);
       await executor.execute('cli:01_types', makeSkillInput(), makeCliConfig());
 
       expect(git.getDiffStat).toHaveBeenCalledWith('01_types');
@@ -360,7 +360,7 @@ describe('CliSkillExecutor', () => {
 
     it('passes undefined to merge when commitMessageFn is not provided', async () => {
       const { CliSkillExecutor } = await import('../../../src/skills/cli-skill-executor.js');
-      const executor = new CliSkillExecutor(ralph as any, git as any, observer);
+      const executor = new CliSkillExecutor(martin as any, git as any, observer);
       await executor.execute('cli:01_types', makeSkillInput(), makeCliConfig());
 
       expect(git.merge).toHaveBeenCalledWith('01_types');
@@ -370,7 +370,7 @@ describe('CliSkillExecutor', () => {
       const commitMessageFn = vi.fn().mockResolvedValue(null);
 
       const { CliSkillExecutor } = await import('../../../src/skills/cli-skill-executor.js');
-      const executor = new CliSkillExecutor(ralph as any, git as any, observer, undefined, commitMessageFn);
+      const executor = new CliSkillExecutor(martin as any, git as any, observer, undefined, commitMessageFn);
       await executor.execute('cli:01_types', makeSkillInput(), makeCliConfig());
 
       expect(git.merge).toHaveBeenCalledWith('01_types');
@@ -380,7 +380,7 @@ describe('CliSkillExecutor', () => {
       const commitMessageFn = vi.fn().mockRejectedValue(new Error('LLM down'));
 
       const { CliSkillExecutor } = await import('../../../src/skills/cli-skill-executor.js');
-      const executor = new CliSkillExecutor(ralph as any, git as any, observer, undefined, commitMessageFn);
+      const executor = new CliSkillExecutor(martin as any, git as any, observer, undefined, commitMessageFn);
       await executor.execute('cli:01_types', makeSkillInput(), makeCliConfig());
 
       // Should still merge, just without a message
@@ -391,25 +391,25 @@ describe('CliSkillExecutor', () => {
   describe('progress logging', () => {
     it('logs rate limit sleep metadata via logger callback wiring', async () => {
       const logger = makeLogger();
-      ralph.run.mockImplementation(async (config: RalphLoopConfig) => {
+      martin.run.mockImplementation(async (config: MartinLoopConfig) => {
         config.onSleep?.(30_000, 'retry-after header');
         config.onIteration?.(1, makeIterResult({ iteration: 1, rateLimited: true, sleepMs: 30_000 }));
         return { completed: true, iterations: 1, output: 'done', tokensUsed: 100 };
       });
 
       const { CliSkillExecutor } = await import('../../../src/skills/cli-skill-executor.js');
-      const executor = new CliSkillExecutor(ralph as any, git as any, observer, undefined, undefined, logger);
+      const executor = new CliSkillExecutor(martin as any, git as any, observer, undefined, undefined, logger);
       await executor.execute('cli:01_types', makeSkillInput(), makeCliConfig());
 
       expect(logger.warn).toHaveBeenCalledWith(
-        'RalphLoop: sleeping for rate limit reset',
+        'MartinLoop: sleeping for rate limit reset',
         expect.objectContaining({ chunkId: '01_types', durationMs: 30_000 }),
-        'ralph',
+        'martin',
       );
       expect(logger.info).toHaveBeenCalledWith(
-        'RalphLoop: iteration complete',
+        'MartinLoop: iteration complete',
         expect.objectContaining({ chunkId: '01_types', iteration: 1, rateLimited: true }),
-        'ralph',
+        'martin',
       );
     });
   });
@@ -420,7 +420,7 @@ describe('CliSkillExecutor', () => {
       git.autoCommit.mockReturnValue(true);
       git.getCurrentHead.mockReturnValue('abc123');
 
-      ralph.run.mockImplementation(async (config: RalphLoopConfig) => {
+      martin.run.mockImplementation(async (config: MartinLoopConfig) => {
         config.onIteration?.(1, makeIterResult({ iteration: 1 }));
         return { completed: true, iterations: 1, output: 'done', tokensUsed: 100 };
       });
@@ -435,7 +435,7 @@ describe('CliSkillExecutor', () => {
       const checkpoint = makeCheckpoint();
       git.autoCommit.mockReturnValue(false);
 
-      ralph.run.mockImplementation(async (config: RalphLoopConfig) => {
+      martin.run.mockImplementation(async (config: MartinLoopConfig) => {
         config.onIteration?.(1, makeIterResult({ iteration: 1 }));
         return { completed: true, iterations: 1, output: 'done', tokensUsed: 100 };
       });
@@ -447,7 +447,7 @@ describe('CliSkillExecutor', () => {
     });
 
     it('works without checkpoint (backward compatible)', async () => {
-      ralph.run.mockImplementation(async (config: RalphLoopConfig) => {
+      martin.run.mockImplementation(async (config: MartinLoopConfig) => {
         config.onIteration?.(1, makeIterResult({ iteration: 1 }));
         return { completed: true, iterations: 1, output: 'done', tokensUsed: 100 };
       });
@@ -464,7 +464,7 @@ describe('CliSkillExecutor', () => {
       git.autoCommit.mockReturnValue(true);
       git.getCurrentHead.mockImplementation(() => `hash_${++commitCount}`);
 
-      ralph.run.mockImplementation(async (config: RalphLoopConfig) => {
+      martin.run.mockImplementation(async (config: MartinLoopConfig) => {
         config.onIteration?.(1, makeIterResult({ iteration: 1 }));
         config.onIteration?.(2, makeIterResult({ iteration: 2 }));
         config.onIteration?.(3, makeIterResult({ iteration: 3 }));

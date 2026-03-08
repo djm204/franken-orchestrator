@@ -105,11 +105,14 @@ async function main(): Promise<void> {
   const { entryPhase, exitAfter } = resolvePhases(args);
 
   // Create and run session
+  // Precedence: CLI args > config file > defaults
   const session = new Session({
     paths,
     baseBranch,
     budget: args.budget,
     provider: args.provider,
+    providers: args.providers ?? config.providers.fallbackChain,
+    providersConfig: config.providers.overrides,
     noPr: args.noPr,
     verbose: args.verbose,
     reset: args.reset,

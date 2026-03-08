@@ -1,5 +1,23 @@
+/**
+ * MartinLoop — the smarter loop.
+ *
+ * Named after Martin because Ralph was too naive for the job:
+ *   - Ralph hardcoded two providers and called it a day.
+ *   - Martin uses a pluggable ProviderRegistry — add a new AI agent
+ *     by dropping in an ICliProvider, not by editing a god function.
+ *   - Ralph panicked on rate limits. Martin gracefully cascades through
+ *     a provider fallback chain, parses retry-after headers from every
+ *     provider dialect, sleeps the minimum time, then picks back up.
+ *   - Ralph dumped raw JSON to the terminal. Martin streams clean text
+ *     in real-time through StreamLineBuffer with thinking content dimmed.
+ *   - Ralph let plugins poison his child processes. Martin sets
+ *     FRANKENBEAST_SPAWNED=1 so rogue plugins know to stand down.
+ *
+ * Rest in peace, Ralph. You were a good first draft.
+ */
+
 import { spawn } from 'node:child_process';
-import type { RalphLoopConfig, RalphLoopResult, IterationResult } from './cli-types.js';
+import type { MartinLoopConfig, MartinLoopResult, IterationResult } from './cli-types.js';
 import type { ICliProvider } from './providers/cli-provider.js';
 import { ProviderRegistry, createDefaultRegistry } from './providers/cli-provider.js';
 import { tryExtractTextFromNode } from './providers/index.js';
@@ -55,7 +73,7 @@ function defaultSleep(ms: number): Promise<void> {
 }
 
 function abortError(): Error {
-  const error = new Error('RalphLoop sleep aborted');
+  const error = new Error('MartinLoop sleep aborted');
   error.name = 'AbortError';
   return error;
 }
@@ -168,7 +186,7 @@ export class StreamLineBuffer {
 }
 
 function spawnIteration(
-  config: RalphLoopConfig,
+  config: MartinLoopConfig,
   provider: ICliProvider,
 ): Promise<{ stdout: string; stderr: string; exitCode: number; timedOut: boolean; cleanStdout: string }> {
   return new Promise((resolve, reject) => {
@@ -237,7 +255,7 @@ function spawnIteration(
         }
         finish({
           stdout,
-          stderr: `${stderr}\n[RalphLoop] iteration timed out after ${config.timeoutMs}ms`,
+          stderr: `${stderr}\n[MartinLoop] iteration timed out after ${config.timeoutMs}ms`,
           exitCode: 124,
           timedOut: true,
           cleanStdout: cleanParts.join('\n'),
@@ -261,14 +279,14 @@ function spawnIteration(
   });
 }
 
-export class RalphLoop {
+export class MartinLoop {
   private readonly registry: ProviderRegistry;
 
   constructor(registry?: ProviderRegistry) {
     this.registry = registry ?? createDefaultRegistry();
   }
 
-  async run(config: RalphLoopConfig): Promise<RalphLoopResult> {
+  async run(config: MartinLoopConfig): Promise<MartinLoopResult> {
     const providers: readonly string[] =
       config.providers && config.providers.length > 0
         ? config.providers
@@ -391,7 +409,7 @@ export class RalphLoop {
           const rawStderrs = [...exhaustedProviders.entries()]
             .map(([p, d]) => `${p}: ${d.stderr}`)
             .join(' | ');
-          console.warn(`[RalphLoop] Rate limit reset time could not be determined. Raw stderr: ${rawStderrs}`);
+          console.warn(`[MartinLoop] Rate limit reset time could not be determined. Raw stderr: ${rawStderrs}`);
         } else {
           sleepMs = shortestSleep * 1000;
           sleepSource = shortestSource;

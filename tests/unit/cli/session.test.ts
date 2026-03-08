@@ -8,7 +8,7 @@ import type { InterviewIO } from '../../../src/planning/interview-loop.js';
 
 // ── Mock heavy dependencies ──
 
-// Mock createCliDeps to avoid real CliSkillExecutor, RalphLoop, etc.
+// Mock createCliDeps to avoid real CliSkillExecutor, MartinLoop, etc.
 const mockFinalize = vi.fn(async () => {});
 const mockDeps = {
   firewall: { runPipeline: vi.fn() },

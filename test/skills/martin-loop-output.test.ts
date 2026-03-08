@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { processStreamLine, StreamLineBuffer } from '../../src/skills/ralph-loop.js';
+import { processStreamLine, StreamLineBuffer } from '../../src/skills/martin-loop.js';
 import { formatIterationProgress, writeProgress } from '../../src/skills/cli-skill-executor.js';
 
 // ── processStreamLine ──
@@ -230,7 +230,7 @@ describe('formatIterationProgress', () => {
       durationMs: 45_000,
       tokensEstimated: 1200,
     });
-    expect(line).toBe('[ralph] Iteration 3/30 | chunk: 04_observer | 45s elapsed | ~1,200 tokens');
+    expect(line).toBe('[martin] Iteration 3/30 | chunk: 04_observer | 45s elapsed | ~1,200 tokens');
   });
 
   it('formats progress without optional duration and tokens', () => {
@@ -239,7 +239,7 @@ describe('formatIterationProgress', () => {
       iteration: 1,
       maxIterations: 10,
     });
-    expect(line).toBe('[ralph] Iteration 1/10 | chunk: my-chunk');
+    expect(line).toBe('[martin] Iteration 1/10 | chunk: my-chunk');
   });
 
   it('formats large token counts with comma separators', () => {
