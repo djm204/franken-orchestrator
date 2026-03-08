@@ -160,8 +160,8 @@ describe('PrCreator', () => {
 
     expect(result).toBeNull();
     expect(logger.warn).toHaveBeenCalledWith(
-      expect.stringContaining('same as target'),
-      expect.anything(),
+      expect.stringContaining('cannot PR main to main'),
+      expect.objectContaining({ branch: 'main' }),
     );
     // Should not attempt to push or create PR
     expect(exec).not.toHaveBeenCalledWith(expect.stringContaining('git push'), expect.anything());
