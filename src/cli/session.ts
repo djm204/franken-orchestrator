@@ -172,7 +172,8 @@ export class Session {
     }
 
     const adapterLlm = new AdapterLlmClient(cliLlmAdapter);
-    const llmGraphBuilder = new LlmGraphBuilder(adapterLlm);
+    const progressLlm = new ProgressLlmClient(adapterLlm, { label: 'Decomposing design...' });
+    const llmGraphBuilder = new LlmGraphBuilder(progressLlm);
 
     logger.info('Decomposing design into chunks...', 'planner');
 
