@@ -21,7 +21,7 @@ export interface SessionConfig {
   budget: number;
   provider: string;
   providers?: string[] | undefined;
-  providersConfig?: Record<string, { command?: string; model?: string; extraArgs?: string[] }> | undefined;
+  providersConfig?: Record<string, { command?: string | undefined; model?: string | undefined; extraArgs?: string[] | undefined }> | undefined;
   noPr: boolean;
   verbose: boolean;
   reset: boolean;
