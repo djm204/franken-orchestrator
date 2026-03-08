@@ -225,7 +225,7 @@ function spawnIteration(
         const lines = streamBuffer.push(text);
         for (const line of lines) {
           cleanParts.push(line);
-          process.stdout.write(line);
+          process.stdout.write(line + '\n');
         }
       } else {
         cleanParts.push(text);
