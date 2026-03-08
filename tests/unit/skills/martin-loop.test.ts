@@ -180,7 +180,7 @@ describe('MartinLoop', () => {
         '--no-session-persistence',
         '--plugin-dir', '/dev/null',
         '--max-turns', '10',
-        '--', 'Implement feature X',
+        '--', expect.stringContaining('Implement feature X'),
       ],
       expect.objectContaining({
         stdio: ['ignore', 'pipe', 'pipe'],
@@ -199,7 +199,7 @@ describe('MartinLoop', () => {
 
     expect(mockSpawn).toHaveBeenCalledWith(
       '/usr/bin/codex',
-      ['exec', '--full-auto', '--json', '--color', 'never', 'Implement feature X'],
+      ['exec', '--full-auto', '--json', '--color', 'never', expect.stringContaining('Implement feature X')],
       expect.objectContaining({
         stdio: ['ignore', 'pipe', 'pipe'],
         cwd: '/tmp/test-project',
@@ -420,7 +420,7 @@ describe('MartinLoop', () => {
     expect(result.output).toContain('custom output');
     expect(mockSpawn).toHaveBeenCalledWith(
       'my-custom-agent',
-      ['--auto', 'Implement feature X'],
+      ['--auto', expect.stringContaining('Implement feature X')],
       expect.objectContaining({
         stdio: ['ignore', 'pipe', 'pipe'],
         cwd: '/tmp/test-project',
@@ -428,5 +428,23 @@ describe('MartinLoop', () => {
     );
     // Custom provider estimates tokens as text.length (not /4)
     expect(result.tokensUsed).toBeGreaterThan(0);
+  });
+
+  // ── No-commit constraint ──
+
+  it('appends no-commit constraint to the prompt sent to the spawned CLI', async () => {
+    queueMock({ stdout: 'Done\n<promise>IMPL_X_DONE</promise>\n', exitCode: 0 });
+
+    const loop = new MartinLoop();
+    await loop.run(baseConfig());
+
+    expect(mockSpawn).toHaveBeenCalledTimes(1);
+    const args = mockSpawn.mock.calls[0][1] as string[];
+    // The prompt is the last argument (after '--' for stream-json providers)
+    const promptArg = args[args.length - 1];
+    expect(promptArg).toContain('Do NOT run git commit');
+    expect(promptArg).toContain('git push');
+    // Original prompt should still be present
+    expect(promptArg).toContain('Implement feature X');
   });
 });

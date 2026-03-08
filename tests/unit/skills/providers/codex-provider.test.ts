@@ -103,6 +103,14 @@ describe('CodexProvider', () => {
     expect(provider.normalizeOutput('plain output')).toBe('plain output');
   });
 
+  it('normalizeOutput returns empty string when JSON parses but contains no text', () => {
+    const raw = [
+      JSON.stringify({ type: 'thread.started', thread_id: '019ccc41-a358' }),
+      JSON.stringify({ type: 'message_stop' }),
+    ].join('\n');
+    expect(provider.normalizeOutput(raw)).toBe('');
+  });
+
   it('normalizeOutput handles mixed JSON and plain text', () => {
     const raw = [
       JSON.stringify({ output_text: 'from json' }),

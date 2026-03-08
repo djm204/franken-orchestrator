@@ -284,6 +284,8 @@ export class StreamLineBuffer {
   }
 }
 
+const NO_COMMIT_CONSTRAINT = '\n\nIMPORTANT: Do NOT run git commit, git push, git tag, or any other git write commands. The orchestrator handles all commits automatically. Only read/edit files and run tests/builds.\n';
+
 function spawnIteration(
   config: MartinLoopConfig,
   provider: ICliProvider,
@@ -291,9 +293,10 @@ function spawnIteration(
   return new Promise((resolve, reject) => {
     const cmd = config.command ?? provider.command;
     const providerArgs = provider.buildArgs({ maxTurns: config.maxTurns });
+    const prompt = config.prompt + NO_COMMIT_CONSTRAINT;
     const args = provider.supportsStreamJson()
-      ? [...providerArgs, '--', config.prompt]
-      : [...providerArgs, config.prompt];
+      ? [...providerArgs, '--', prompt]
+      : [...providerArgs, prompt];
 
     const env = provider.filterEnv(process.env as Record<string, string>);
 

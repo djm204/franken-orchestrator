@@ -286,7 +286,7 @@ describe('CliLlmAdapter', () => {
 
   describe('transformResponse', () => {
     describe('stream-json path (supportsStreamJson=true, ClaudeProvider)', () => {
-      it('parses stream-json output and extracts text from deltas', () => {
+      it('extracts text from stream-json deltas via provider.normalizeOutput', () => {
         const adapter = new CliLlmAdapter(claudeProvider, baseOpts);
         const streamJson = [
           '{"type":"message_start","message":{"id":"msg_01","type":"message","role":"assistant","content":[]}}',
@@ -296,7 +296,8 @@ describe('CliLlmAdapter', () => {
         ].join('\n');
 
         const result = adapter.transformResponse(streamJson, 'req-1');
-        expect(result.content).toBe('Hello world');
+        // Provider joins per-line extracted text with \n
+        expect(result.content).toBe('Hello \nworld');
       });
 
       it('returns plain text as-is when not JSON', () => {
@@ -348,6 +349,39 @@ describe('CliLlmAdapter', () => {
         expect(result.content).not.toContain('EXTREMELY_IMPORTANT');
       });
 
+      it('returns empty string when all lines are structural stream-json frames', () => {
+        const adapter = new CliLlmAdapter(claudeProvider, baseOpts);
+        const allStructural = [
+          '{"type":"thread.started","thread_id":"019ccc41-a358-72b3-a5d1-1d4534be15"}',
+          '{"type":"message_start","message":{"id":"msg_01","type":"message","role":"assistant","content":[]}}',
+          '{"type":"ping"}',
+          '{"type":"message_stop"}',
+        ].join('\n');
+
+        const result = adapter.transformResponse(allStructural, 'req-1');
+        // Must NOT return raw JSON — that causes junk git commit messages
+        expect(result.content).toBe('');
+      });
+
+      it('delegates to provider.normalizeOutput for all providers including stream-json', () => {
+        // Mock provider that returns a known value from normalizeOutput
+        const mockProvider = {
+          name: 'mock',
+          command: 'mock',
+          buildArgs: () => [],
+          normalizeOutput: (raw: string) => `normalized:${raw.length}`,
+          estimateTokens: () => 0,
+          isRateLimited: () => false,
+          parseRetryAfter: () => undefined,
+          filterEnv: (env: Record<string, string>) => env,
+          supportsStreamJson: () => true,
+        };
+
+        const adapter = new CliLlmAdapter(mockProvider, baseOpts);
+        const result = adapter.transformResponse('some raw output', 'req-1');
+        expect(result.content).toBe('normalized:15');
+      });
+
       it('returns empty content when response is only hook output', () => {
         const adapter = new CliLlmAdapter(claudeProvider, baseOpts);
         const raw = [
@@ -375,12 +409,12 @@ describe('CliLlmAdapter', () => {
         expect(result.content).toBe('codex result');
       });
 
-      it('returns raw output when normalizeOutput returns raw on empty extraction', () => {
+      it('returns empty string when JSON parses but no text is extracted', () => {
         const adapter = new CliLlmAdapter(codexProvider, baseOpts);
         const raw = '{"type":"status","status":"complete"}';
         const result = adapter.transformResponse(raw, 'req-1');
-        // CodexProvider.normalizeOutput returns raw if JSON parsed but no text extracted
-        expect(result.content).toBe(raw);
+        // CodexProvider.normalizeOutput returns '' when JSON parsed but no text extracted
+        expect(result.content).toBe('');
       });
 
       it('returns empty string for empty input', () => {

@@ -47,6 +47,131 @@ function mockExec(overrides?: Partial<Record<string, string | Error>>): ReturnTy
   });
 }
 
+describe('generateCommitMessage — fallback on garbage', () => {
+  it('returns canned chore: message when LLM returns raw stream-json', async () => {
+    const llm = {
+      complete: vi.fn().mockResolvedValue(
+        '{"type":"thread.started","thread_id":"019ccc41-a358"}\n{"type":"message_stop"}',
+      ),
+    };
+    const creator = new PrCreator(
+      { targetBranch: 'main', disabled: false, remote: 'origin' },
+      vi.fn(),
+      llm,
+    );
+
+    const result = await creator.generateCommitMessage(
+      ' src/auth.ts | 10 ++++',
+      'fix authentication null check',
+    );
+
+    expect(result).toBeTruthy();
+    expect(result!).toMatch(/^(feat|fix|chore|refactor|docs|test|ci|perf)/);
+    expect(result!).not.toContain('"type"');
+    expect(result!).not.toContain('thread.started');
+  });
+
+  it('returns canned message when LLM returns non-conventional text', async () => {
+    const llm = {
+      complete: vi.fn().mockResolvedValue(
+        'Sure! Here is your commit message: feat(auth): fix stuff',
+      ),
+    };
+    const creator = new PrCreator(
+      { targetBranch: 'main', disabled: false, remote: 'origin' },
+      vi.fn(),
+      llm,
+    );
+
+    const result = await creator.generateCommitMessage(
+      ' src/auth.ts | 10 ++++',
+      'fix authentication null check',
+    );
+
+    expect(result).toBeTruthy();
+    expect(result!).toMatch(/^(feat|fix|chore|refactor|docs|test|ci|perf)/);
+    // Should NOT start with "Sure!"
+    expect(result!).not.toMatch(/^Sure/);
+  });
+
+  it('passes through valid conventional commit messages unchanged', async () => {
+    const llm = {
+      complete: vi.fn().mockResolvedValue('feat(auth): add session validation'),
+    };
+    const creator = new PrCreator(
+      { targetBranch: 'main', disabled: false, remote: 'origin' },
+      vi.fn(),
+      llm,
+    );
+
+    const result = await creator.generateCommitMessage(
+      ' src/auth.ts | 10 ++++',
+      'add session validation',
+    );
+
+    expect(result).toBeTruthy();
+    expect(result!).toContain('feat(auth): add session validation');
+  });
+
+  it('extracts valid commit from language-tagged code fence', async () => {
+    const llm = {
+      complete: vi.fn().mockResolvedValue(
+        '```text\nfeat(auth): add session validation\n```',
+      ),
+    };
+    const creator = new PrCreator(
+      { targetBranch: 'main', disabled: false, remote: 'origin' },
+      vi.fn(),
+      llm,
+    );
+
+    const result = await creator.generateCommitMessage(
+      ' src/auth.ts | 10 ++++',
+      'add session validation',
+    );
+
+    expect(result).toBeTruthy();
+    expect(result!).toContain('feat(auth): add session validation');
+  });
+
+  it('produces clean slug without leading/trailing/double hyphens', async () => {
+    const llm = { complete: vi.fn().mockResolvedValue('') };
+    const creator = new PrCreator(
+      { targetBranch: 'main', disabled: false, remote: 'origin' },
+      vi.fn(),
+      llm,
+    );
+
+    const result = await creator.generateCommitMessage(
+      ' src/auth.ts | 10 ++++',
+      '! fix @auth/core -- issue !',
+    );
+
+    expect(result).toBeTruthy();
+    // Should not have leading/trailing/double hyphens in the slug
+    expect(result!).toMatch(/^chore: implement [a-z0-9]/);
+    expect(result!).not.toMatch(/^chore: implement -/);
+    expect(result!).not.toMatch(/--/);
+  });
+
+  it('returns canned message when LLM returns empty string', async () => {
+    const llm = { complete: vi.fn().mockResolvedValue('') };
+    const creator = new PrCreator(
+      { targetBranch: 'main', disabled: false, remote: 'origin' },
+      vi.fn(),
+      llm,
+    );
+
+    const result = await creator.generateCommitMessage(
+      ' src/auth.ts | 10 ++++',
+      'fix auth bug',
+    );
+
+    expect(result).toBeTruthy();
+    expect(result!).toMatch(/^chore: implement/);
+  });
+});
+
 describe('PrCreator issue reference integration', () => {
   describe('create() with issueNumber', () => {
     it('includes Fixes #N in PR body when issueNumber is provided (template path)', async () => {

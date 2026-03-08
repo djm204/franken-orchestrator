@@ -6,38 +6,11 @@
  */
 
 import type { ICliProvider, ProviderOpts } from './cli-provider.js';
+import { tryExtractTextFromNode } from './stream-json-utils.js';
 
+// Gemini adds RESOURCE_EXHAUSTED to the shared base patterns
 const RATE_LIMIT_PATTERNS =
   /RESOURCE_EXHAUSTED|rate.?limit|429|too many requests|retry.?after|overloaded|capacity|temporarily unavailable|out of extra usage|usage limit|resets?\s+\d|resets?\s+in\s+\d+\s*s/i;
-
-function tryExtractTextFromNode(node: unknown, out: string[]): void {
-  if (typeof node === 'string') {
-    if (node.trim().length > 0) out.push(node);
-    return;
-  }
-  if (!node || typeof node !== 'object') return;
-
-  if (Array.isArray(node)) {
-    for (const item of node) tryExtractTextFromNode(item, out);
-    return;
-  }
-
-  const obj = node as Record<string, unknown>;
-  const directKeys = ['text', 'output_text', 'output'];
-  for (const key of directKeys) {
-    const value = obj[key];
-    if (typeof value === 'string' && value.trim().length > 0) {
-      out.push(value);
-    }
-  }
-
-  const nestedKeys = ['delta', 'content', 'parts', 'data', 'result', 'response', 'message', 'content_block'];
-  for (const key of nestedKeys) {
-    if (obj[key] !== undefined) {
-      tryExtractTextFromNode(obj[key], out);
-    }
-  }
-}
 
 export class GeminiProvider implements ICliProvider {
   readonly name = 'gemini';
