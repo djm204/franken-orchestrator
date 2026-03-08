@@ -156,10 +156,10 @@ vi.mock('../../../src/logging/beast-logger.js', () => ({
 
 // ── Helpers ──
 
-function mockIO(answers: string[] = ['yes']): InterviewIO {
+function mockIO(answers: string[] = ['c']): InterviewIO {
   let idx = 0;
   return {
-    ask: vi.fn(async () => answers[idx++] ?? 'yes'),
+    ask: vi.fn(async () => answers[idx++] ?? 'c'),
     display: vi.fn(),
   };
 }
@@ -252,8 +252,8 @@ describe('Session', () => {
 
       expect(result).toBeDefined();
       expect(result!.status).toBe('completed');
-      // reviewLoop called for both interview and plan phases
-      expect(mockReviewLoop).toHaveBeenCalledTimes(2);
+      // reviewLoop is only used for the plan phase.
+      expect(mockReviewLoop).toHaveBeenCalledTimes(1);
     });
 
     it('chains plan -> execute when starting from plan', async () => {
@@ -304,16 +304,13 @@ describe('Session', () => {
       expect(mockWriteDesignDoc).toHaveBeenCalled();
     });
 
-    it('runs review loop after writing design doc', async () => {
+    it('shows the follow-up interview prompt after writing the design doc', async () => {
       const { Session } = await import('../../../src/cli/session.js');
       const config = makeConfig({ entryPhase: 'interview', exitAfter: 'interview' });
       await new Session(config).start();
 
-      expect(mockReviewLoop).toHaveBeenCalledWith(
-        expect.objectContaining({
-          artifactLabel: 'Design document',
-          io: config.io,
-        }),
+      expect(config.io.ask).toHaveBeenCalledWith(
+        expect.stringContaining('[c] Continue to planning phase'),
       );
     });
   });

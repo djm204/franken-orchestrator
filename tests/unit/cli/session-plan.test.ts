@@ -9,6 +9,10 @@ import type { InterviewIO } from '../../../src/planning/interview-loop.js';
 // ── Track AdapterLlmClient constructor arg ──
 
 let adapterCtorArg: unknown = undefined;
+let progressCtorInner: unknown = undefined;
+let progressCtorOptions: unknown = undefined;
+let progressInstance: unknown = undefined;
+let llmGraphBuilderCtorArg: unknown = undefined;
 
 // ── Mock heavy deps ──
 
@@ -71,6 +75,20 @@ vi.mock('../../../src/adapters/adapter-llm-client.js', () => {
   return { AdapterLlmClient: MockAdapterLlmClient };
 });
 
+vi.mock('../../../src/adapters/progress-llm-client.js', () => {
+  const MockProgressLlmClient = vi.fn(function (
+    this: { complete: typeof mockComplete },
+    inner: unknown,
+    options?: unknown,
+  ) {
+    progressInstance = this;
+    progressCtorInner = inner;
+    progressCtorOptions = options;
+    this.complete = mockComplete;
+  });
+  return { ProgressLlmClient: MockProgressLlmClient };
+});
+
 // Mock InterviewLoop
 const mockInterviewBuild = vi.fn(async () => ({ tasks: [] }));
 vi.mock('../../../src/planning/interview-loop.js', () => {
@@ -92,7 +110,9 @@ const mockLlmGraphBuild = vi.fn(async () => ({
 vi.mock('../../../src/planning/llm-graph-builder.js', () => {
   const MockLlmGraphBuilder = vi.fn(function (
     this: { build: typeof mockLlmGraphBuild },
+    llm: unknown,
   ) {
+    llmGraphBuilderCtorArg = llm;
     this.build = mockLlmGraphBuild;
   });
   return { LlmGraphBuilder: MockLlmGraphBuilder };
@@ -169,6 +189,10 @@ describe('Session plan phase — CliLlmAdapter wiring', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     adapterCtorArg = undefined;
+    progressCtorInner = undefined;
+    progressCtorOptions = undefined;
+    progressInstance = undefined;
+    llmGraphBuilderCtorArg = undefined;
     console.log = vi.fn();
   });
 
@@ -195,6 +219,21 @@ describe('Session plan phase — CliLlmAdapter wiring', () => {
     await new Session(config).start();
 
     expect(mockLlmGraphBuild).toHaveBeenCalled();
+  });
+
+  it('runPlan() wraps AdapterLlmClient with ProgressLlmClient before building the plan', async () => {
+    const { Session } = await import('../../../src/cli/session.js');
+    const config = makeConfig();
+    await new Session(config).start();
+
+    const { ProgressLlmClient } = await import(
+      '../../../src/adapters/progress-llm-client.js'
+    );
+
+    expect(ProgressLlmClient).toHaveBeenCalled();
+    expect(progressCtorInner).toBeDefined();
+    expect(progressInstance).toBe(llmGraphBuilderCtorArg);
+    expect(progressCtorOptions).toEqual({ label: 'Decomposing design...' });
   });
 });
 
