@@ -9,6 +9,8 @@ import { ANSI, budgetBar, statusBadge, logHeader } from '../logging/beast-logger
 import type { InterviewIO } from '../planning/interview-loop.js';
 import type { BeastResult } from '../types.js';
 import type { ProjectPaths } from './project-root.js';
+import type { ReviewIO } from '../issues/issue-review.js';
+import type { IssueFetchOptions, IssueOutcome } from '../issues/types.js';
 import { createCliDeps } from './dep-factory.js';
 import { extractDesignSummary, formatDesignCard } from './design-summary.js';
 import { reviewLoop } from './review-loop.js';
@@ -49,6 +51,14 @@ export interface SessionConfig {
   minCritiqueScore?: number | undefined;
   /** Maximum total tokens before budget breaker trips */
   maxTotalTokens?: number | undefined;
+  // ── Issue-specific config ──
+  issueLabel?: string[] | undefined;
+  issueMilestone?: string | undefined;
+  issueSearch?: string | undefined;
+  issueAssignee?: string | undefined;
+  issueLimit?: number | undefined;
+  issueRepo?: string | undefined;
+  dryRun?: boolean | undefined;
 }
 
 export class Session {
@@ -79,6 +89,92 @@ export class Session {
     }
 
     return undefined;
+  }
+
+  async runIssues(): Promise<void> {
+    const { io, budget, baseBranch, noPr, dryRun } = this.config;
+
+    // Adapt InterviewIO to ReviewIO
+    const reviewIO: ReviewIO = {
+      read: () => io.ask(''),
+      write: (text: string) => io.display(text),
+    };
+
+    const { logger, issueDeps, finalize } = await createCliDeps({
+      ...this.buildDepOptions(),
+      issueIO: reviewIO,
+      dryRun,
+    });
+
+    if (!issueDeps) {
+      throw new Error('Issue dependencies not created');
+    }
+
+    const { fetcher, triage, review, graphBuilder, runner, executor, git, prCreator, checkpoint } = issueDeps;
+
+    // Infer repo — fall back to --repo flag
+    let repo: string;
+    try {
+      repo = await fetcher.inferRepo();
+    } catch {
+      if (this.config.issueRepo) {
+        repo = this.config.issueRepo;
+      } else {
+        throw new Error('Could not infer repository. Use --repo <owner/repo> to specify.');
+      }
+    }
+
+    // Build fetch options from CLI args
+    const fetchOptions: IssueFetchOptions = {
+      repo,
+      label: this.config.issueLabel,
+      milestone: this.config.issueMilestone,
+      search: this.config.issueSearch,
+      assignee: this.config.issueAssignee,
+      limit: this.config.issueLimit,
+    };
+
+    // Fetch
+    logger.info('Fetching issues...', 'issues');
+    const issues = await fetcher.fetch(fetchOptions);
+    logger.info(`Found ${issues.length} issue(s)`, 'issues');
+
+    // Triage
+    logger.info('Triaging issues...', 'issues');
+    const triageResults = await triage.triage(issues);
+
+    // Review (HITL)
+    const decision = await review.review(issues, triageResults);
+
+    if (decision.action === 'abort') {
+      logger.info('Issue processing aborted by user', 'issues');
+      await finalize();
+      return;
+    }
+
+    // Execute approved issues
+    logger.info('Executing approved issues...', 'issues');
+
+    const approvedNumbers = new Set(decision.approved.map(t => t.issueNumber));
+    const approvedIssues = issues.filter(i => approvedNumbers.has(i.number));
+
+    const outcomes = await runner.run({
+      issues: approvedIssues,
+      triageResults: decision.approved,
+      graphBuilder,
+      executor,
+      git,
+      prCreator,
+      checkpoint,
+      logger,
+      budget,
+      baseBranch,
+      noPr,
+      repo,
+    });
+
+    this.displayIssueSummary(outcomes);
+    await finalize();
   }
 
   private async runInterview(): Promise<'continue' | 'exit'> {
@@ -289,6 +385,41 @@ export class Session {
     const parts = [`${passed} passed`, `${failed} failed`];
     if (skipped > 0) parts.push(`${skipped} skipped`);
     console.log(`\n  ${failed === 0 ? A.green : A.red}${A.bold}Result: ${parts.join(', ')}${A.reset}\n`);
+  }
+
+  private displayIssueSummary(outcomes: IssueOutcome[]): void {
+    const A = ANSI;
+    console.log(logHeader('ISSUE SUMMARY'));
+
+    const TITLE_MAX = 40;
+    console.log(
+      `  ${'#'.padStart(5)}  ${'Title'.padEnd(TITLE_MAX)}  ${'Status'.padEnd(8)}  PR`,
+    );
+    console.log(`  ${'-'.repeat(70)}`);
+
+    for (const o of outcomes) {
+      const badge =
+        o.status === 'fixed'
+          ? `${A.green}fixed${A.reset}`
+          : o.status === 'skipped'
+            ? `${A.dim}skipped${A.reset}`
+            : `${A.red}failed${A.reset}`;
+      const title =
+        o.issueTitle.length > TITLE_MAX
+          ? o.issueTitle.slice(0, TITLE_MAX - 3) + '...'
+          : o.issueTitle;
+      const pr = o.prUrl ?? '-';
+      console.log(
+        `  ${String(o.issueNumber).padStart(5)}  ${title.padEnd(TITLE_MAX)}  ${badge.padEnd(8)}  ${pr}`,
+      );
+    }
+
+    const fixed = outcomes.filter((o) => o.status === 'fixed').length;
+    const failed = outcomes.filter((o) => o.status === 'failed').length;
+    const skipped = outcomes.filter((o) => o.status === 'skipped').length;
+    console.log(
+      `\n  ${fixed === outcomes.length ? A.green : A.red}${A.bold}Result: ${fixed} fixed, ${failed} failed, ${skipped} skipped${A.reset}\n`,
+    );
   }
 
   private buildDepOptions() {

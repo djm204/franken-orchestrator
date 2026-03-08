@@ -1,6 +1,6 @@
 import { parseArgs as nodeParseArgs } from 'node:util';
 
-export type Subcommand = 'interview' | 'plan' | 'run' | undefined;
+export type Subcommand = 'interview' | 'plan' | 'run' | 'issues' | undefined;
 
 export interface CliArgs {
   subcommand: Subcommand;
@@ -18,9 +18,16 @@ export interface CliArgs {
   cleanup: boolean;
   config?: string | undefined;
   help: boolean;
+  issueLabel?: string[] | undefined;
+  issueMilestone?: string | undefined;
+  issueSearch?: string | undefined;
+  issueAssignee?: string | undefined;
+  issueLimit?: number | undefined;
+  issueRepo?: string | undefined;
+  dryRun?: boolean | undefined;
 }
 
-const VALID_SUBCOMMANDS = new Set(['interview', 'plan', 'run']);
+const VALID_SUBCOMMANDS = new Set(['interview', 'plan', 'run', 'issues']);
 
 const USAGE = `
 Usage: frankenbeast [subcommand] [options]
@@ -29,6 +36,7 @@ Subcommands:
   interview               Gather requirements interactively, generate design doc
   plan --design-doc <f>   Decompose design doc into chunk files
   run                     Execute chunk files (from .frankenbeast/ or --plan-dir)
+  issues                  Fetch and filter GitHub issues
 
 Options:
   --base-dir <path>       Project root (default: cwd)
@@ -46,6 +54,15 @@ Options:
   --cleanup               Remove all build logs, checkpoints, and traces
   --help                  Show this help message
 
+Issue Flags (for 'issues' subcommand):
+  --label <labels>        Comma-separated labels (e.g. critical,high)
+  --milestone <name>      Filter by milestone
+  --search <query>        Search issues by text
+  --assignee <user>       Filter by assignee
+  --limit <n>             Max issues to fetch (default: 30)
+  --repo <owner/repo>     Target repository
+  --dry-run               Preview without executing
+
 Examples:
   frankenbeast                              # full interactive flow
   frankenbeast --design-doc design.md       # skip interview
@@ -54,6 +71,8 @@ Examples:
   frankenbeast plan --design-doc design.md  # plan only
   frankenbeast run                          # execute only
   frankenbeast run --resume                 # resume execution
+  frankenbeast issues --label critical,high # fetch filtered issues
+  frankenbeast issues --dry-run             # preview issue fetch
 `.trim();
 
 export function printUsage(): void {
@@ -66,7 +85,7 @@ export function parseArgs(argv: string[] = process.argv.slice(2)): CliArgs {
   let flagArgs = argv;
   const first = argv[0];
   if (first !== undefined && VALID_SUBCOMMANDS.has(first) && !first.startsWith('-')) {
-    subcommand = first as 'interview' | 'plan' | 'run';
+    subcommand = first as 'interview' | 'plan' | 'run' | 'issues';
     flagArgs = argv.slice(1);
   }
 
@@ -87,6 +106,13 @@ export function parseArgs(argv: string[] = process.argv.slice(2)): CliArgs {
       resume: { type: 'boolean', default: false },
       cleanup: { type: 'boolean', default: false },
       help: { type: 'boolean', default: false },
+      label: { type: 'string' },
+      milestone: { type: 'string' },
+      search: { type: 'string' },
+      assignee: { type: 'string' },
+      limit: { type: 'string' },
+      repo: { type: 'string' },
+      'dry-run': { type: 'boolean', default: false },
     },
     strict: true,
   });
@@ -97,6 +123,24 @@ export function parseArgs(argv: string[] = process.argv.slice(2)): CliArgs {
   const providers = providersRaw
     ? providersRaw.split(',').map((p) => p.trim().toLowerCase())
     : undefined;
+
+  // Warn on conflicting flags
+  if (subcommand === 'issues' && values['design-doc']) {
+    console.warn('Warning: --design-doc is not relevant for the issues subcommand');
+  }
+
+  const labelRaw = values.label;
+  const issueLabel = labelRaw
+    ? labelRaw.split(',').map((l) => l.trim())
+    : undefined;
+
+  const limitRaw = values.limit;
+  let issueLimit: number | undefined;
+  if (limitRaw !== undefined) {
+    issueLimit = parseInt(limitRaw, 10);
+  } else if (subcommand === 'issues') {
+    issueLimit = 30;
+  }
 
   return {
     subcommand,
@@ -114,5 +158,12 @@ export function parseArgs(argv: string[] = process.argv.slice(2)): CliArgs {
     resume: values.resume ?? false,
     cleanup: values.cleanup ?? false,
     help: values.help ?? false,
+    issueLabel,
+    issueMilestone: values.milestone,
+    issueSearch: values.search,
+    issueAssignee: values.assignee,
+    issueLimit,
+    issueRepo: values.repo,
+    dryRun: values['dry-run'] ?? undefined,
   };
 }

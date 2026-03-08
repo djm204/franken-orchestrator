@@ -10,6 +10,12 @@ import { CliObserverBridge } from '../adapters/cli-observer-bridge.js';
 import { FileCheckpointStore } from '../checkpoint/file-checkpoint-store.js';
 import { PrCreator } from '../closure/pr-creator.js';
 import { AdapterLlmClient } from '../adapters/adapter-llm-client.js';
+import { IssueFetcher } from '../issues/issue-fetcher.js';
+import { IssueTriage } from '../issues/issue-triage.js';
+import { IssueGraphBuilder } from '../issues/issue-graph-builder.js';
+import { IssueReview } from '../issues/issue-review.js';
+import type { ReviewIO } from '../issues/issue-review.js';
+import { IssueRunner } from '../issues/issue-runner.js';
 import { setupTraceViewer } from './trace-viewer.js';
 import type { TraceViewerHandle } from './trace-viewer.js';
 import type {
@@ -30,6 +36,22 @@ export interface CliDepOptions {
   verbose: boolean;
   reset: boolean;
   planDirOverride?: string | undefined;
+  /** When provided, issue-specific deps will be created. */
+  issueIO?: ReviewIO | undefined;
+  /** Dry-run flag for IssueReview. */
+  dryRun?: boolean | undefined;
+}
+
+export interface IssueCliDeps {
+  fetcher: IssueFetcher;
+  triage: IssueTriage;
+  graphBuilder: IssueGraphBuilder;
+  review: IssueReview;
+  runner: IssueRunner;
+  executor: CliSkillExecutor;
+  git: GitBranchIsolator;
+  prCreator?: PrCreator | undefined;
+  checkpoint: FileCheckpointStore;
 }
 
 export interface CliDeps {
@@ -38,6 +60,7 @@ export interface CliDeps {
   observerBridge: CliObserverBridge;
   logger: BeastLogger;
   finalize: () => Promise<void>;
+  issueDeps?: IssueCliDeps | undefined;
 }
 
 // ── Passthrough Stubs ──
@@ -185,5 +208,22 @@ export async function createCliDeps(options: CliDepOptions): Promise<CliDeps> {
     ...(prCreator ? { prCreator } : {}),
   };
 
-  return { deps, cliLlmAdapter, observerBridge, logger, finalize };
+  // Issue pipeline deps (only created when issueIO is provided)
+  let issueDeps: IssueCliDeps | undefined;
+  if (options.issueIO) {
+    const completeFn = (prompt: string) => adapterLlm.complete(prompt);
+    issueDeps = {
+      fetcher: new IssueFetcher(),
+      triage: new IssueTriage(completeFn),
+      graphBuilder: new IssueGraphBuilder(completeFn),
+      review: new IssueReview(options.issueIO, { dryRun: options.dryRun }),
+      runner: new IssueRunner(),
+      executor: cliExecutor,
+      git: gitIso,
+      prCreator,
+      checkpoint,
+    };
+  }
+
+  return { deps, cliLlmAdapter, observerBridge, logger, finalize, issueDeps };
 }

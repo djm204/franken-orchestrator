@@ -44,6 +44,9 @@ export function resolvePhases(args: Pick<CliArgs, 'subcommand' | 'designDoc' | '
   if (args.subcommand === 'run') {
     return { entryPhase: 'execute' };
   }
+  if (args.subcommand === 'issues') {
+    return { entryPhase: 'execute' };
+  }
 
   // Default mode — detect entry from provided files
   if (args.planDir) {
@@ -132,6 +135,14 @@ async function main(): Promise<void> {
     ...(exitAfter !== undefined ? { exitAfter } : {}),
     ...(args.designDoc !== undefined ? { designDocPath: args.designDoc } : {}),
     ...(args.planDir !== undefined ? { planDirOverride: args.planDir } : {}),
+    // Issue-specific config
+    issueLabel: args.issueLabel,
+    issueMilestone: args.issueMilestone,
+    issueSearch: args.issueSearch,
+    issueAssignee: args.issueAssignee,
+    issueLimit: args.issueLimit,
+    issueRepo: args.issueRepo,
+    dryRun: args.dryRun,
     maxCritiqueIterations: config.maxCritiqueIterations,
     maxDurationMs: config.maxDurationMs,
     enableTracing: config.enableTracing,
@@ -139,6 +150,12 @@ async function main(): Promise<void> {
     minCritiqueScore: config.minCritiqueScore,
     maxTotalTokens: config.maxTotalTokens,
   });
+
+  // Issues subcommand dispatches to a separate flow
+  if (args.subcommand === 'issues') {
+    await session.runIssues();
+    return;
+  }
 
   const result = await session.start();
 
