@@ -9,3 +9,4 @@ export type {
 } from './types.js';
 
 export { IssueFetcher } from './issue-fetcher.js';
+export { IssueTriage } from './issue-triage.js';
