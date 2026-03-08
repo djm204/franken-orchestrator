@@ -282,7 +282,7 @@ describe('PrCreator', () => {
 
       const msg = await creator.generateCommitMessage('src/auth.ts | 42 +++ 3 ---', 'Add JWT authentication');
 
-      expect(msg).toBe('feat(auth): add JWT validation');
+      expect(msg).toBe('feat(auth): add JWT validation\n\nmade with Frankenbeast 🧟');
       expect(llm.complete).toHaveBeenCalledWith(expect.stringContaining('Add JWT authentication'));
       expect(llm.complete).toHaveBeenCalledWith(expect.stringContaining('src/auth.ts'));
     });
@@ -313,7 +313,7 @@ describe('PrCreator', () => {
 
       const msg = await creator.generateCommitMessage('diff stat', 'objective');
 
-      expect(msg).toBe('feat(auth): add JWT');
+      expect(msg).toBe('feat(auth): add JWT\n\nmade with Frankenbeast 🧟');
     });
 
     it('truncates messages longer than 72 chars', async () => {
@@ -324,7 +324,9 @@ describe('PrCreator', () => {
 
       const msg = await creator.generateCommitMessage('diff stat', 'objective');
 
-      expect(msg!.length).toBeLessThanOrEqual(72);
+      const subjectLine = msg!.split('\n')[0];
+      expect(subjectLine.length).toBeLessThanOrEqual(72);
+      expect(msg).toContain('made with Frankenbeast 🧟');
     });
   });
 

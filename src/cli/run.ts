@@ -5,6 +5,7 @@ import { existsSync } from 'node:fs';
 import { parseArgs, printUsage } from './args.js';
 import type { CliArgs } from './args.js';
 import { loadConfig } from './config-loader.js';
+import { cleanupBuild } from './cleanup.js';
 import type { OrchestratorConfig } from '../config/orchestrator-config.js';
 import { resolveProjectRoot, getProjectPaths, scaffoldFrankenbeast } from './project-root.js';
 import { resolveBaseBranch } from './base-branch.js';
@@ -72,6 +73,16 @@ async function main(): Promise<void> {
 
   if (args.help) {
     printUsage();
+    process.exit(0);
+  }
+
+  if (args.cleanup) {
+    const root = resolveProjectRoot(args.baseDir);
+    const paths = getProjectPaths(root);
+    const removed = cleanupBuild(paths.buildDir);
+    console.log(removed > 0
+      ? `Cleaned up ${removed} file${removed === 1 ? '' : 's'} from ${paths.buildDir}`
+      : 'Nothing to clean up.');
     process.exit(0);
   }
 

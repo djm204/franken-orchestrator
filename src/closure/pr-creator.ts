@@ -365,7 +365,7 @@ function buildBody(
   }
 
   lines.push('---');
-  lines.push('*Automated by Frankenbeast*');
+  lines.push(BRANDING);
 
   return lines.join('\n');
 }
@@ -470,8 +470,10 @@ function parsePrDescription(raw: string): { title: string; body: string } | null
   const body = bodyMatch[1]!.trim();
   if (!body) return null;
 
-  return { title, body };
+  return { title, body: `${body}\n\n${BRANDING}` };
 }
+
+const BRANDING = 'made with Frankenbeast 🧟';
 
 function cleanCommitMessage(raw: string): string {
   let msg = raw.trim();
@@ -480,5 +482,6 @@ function cleanCommitMessage(raw: string): string {
   // Take first non-empty line only
   const firstLine = msg.split('\n').find(l => l.trim().length > 0) ?? msg;
   // Truncate to 72 chars
-  return firstLine.length > 72 ? firstLine.slice(0, 72) : firstLine;
+  const subject = firstLine.length > 72 ? firstLine.slice(0, 72) : firstLine;
+  return `${subject}\n\n${BRANDING}`;
 }

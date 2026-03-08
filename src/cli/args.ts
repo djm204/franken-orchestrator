@@ -15,6 +15,7 @@ export interface CliArgs {
   verbose: boolean;
   reset: boolean;
   resume: boolean;
+  cleanup: boolean;
   config?: string | undefined;
   help: boolean;
 }
@@ -42,6 +43,7 @@ Options:
   --verbose               Debug logs + trace viewer
   --reset                 Clear checkpoint and traces
   --resume                Resume from checkpoint
+  --cleanup               Remove all build logs, checkpoints, and traces
   --help                  Show this help message
 
 Examples:
@@ -83,6 +85,7 @@ export function parseArgs(argv: string[] = process.argv.slice(2)): CliArgs {
       verbose: { type: 'boolean', default: false },
       reset: { type: 'boolean', default: false },
       resume: { type: 'boolean', default: false },
+      cleanup: { type: 'boolean', default: false },
       help: { type: 'boolean', default: false },
     },
     strict: true,
@@ -109,6 +112,7 @@ export function parseArgs(argv: string[] = process.argv.slice(2)): CliArgs {
     verbose: values.verbose ?? false,
     reset: values.reset ?? false,
     resume: values.resume ?? false,
+    cleanup: values.cleanup ?? false,
     help: values.help ?? false,
   };
 }
